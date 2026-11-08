@@ -5,6 +5,8 @@
 //   --debug       outline tracked windows + Dock estimate, print stats on quit
 //   --lead L      predict window position L frames ahead to hide overlay lag (default 1)
 //   --snowrate R  pile growth speed multiplier (default 1; try 10 to see piles quickly)
+//   --selftest    check the plow's invariants (mass kept, ridge capped) and exit
+//   --log         print why snow leaves a window (no outlines; --debug includes this)
 
 import AppKit
 import MetalKit
@@ -14,7 +16,8 @@ func arg(_ name: String) -> Double? {
 }
 let fps = Int(arg("--fps") ?? 60)
 let debug = CommandLine.arguments.contains("--debug")
-let tracker = WindowTracker()
+let eventLog = debug || CommandLine.arguments.contains("--log")
+let tracker = WindowTracker(debug: eventLog)
 let dock = DockInfo()
 
 // Screens in global top-left coordinates (what the window list uses); Cocoa is bottom-left.
@@ -27,8 +30,16 @@ let dock = DockInfo()
     }
 }
 let screenInfos = currentScreens()
+// Points per centimetre on the main display, from its physical size (EDID), for "6–7 cm" distances.
+let pointsPerCm: Float = {
+    let mm = CGDisplayScreenSize(CGMainDisplayID())
+    let pts = NSScreen.screens[0].frame.width
+    return mm.width > 0 ? Float(pts / (mm.width / 10)) : 49
+}()
 let snowpack = Snowpack(tracker: tracker, dock: dock, screens: screenInfos,
-                        lead: (arg("--lead") ?? 1) / Double(fps), rateScale: Float(arg("--snowrate") ?? 1))
+                        lead: (arg("--lead") ?? 1) / Double(fps), rateScale: Float(arg("--snowrate") ?? 1),
+                        pointsPerCm: pointsPerCm)
+snowpack.debugLog = eventLog
 
 @MainActor
 func makeOverlay(on screen: NSScreen, index: Int, device: MTLDevice) throws -> (NSPanel, MTKView, SnowRenderer) {
@@ -63,6 +74,12 @@ func makeOverlay(on screen: NSScreen, index: Int, device: MTLDevice) throws -> (
     panel.contentView = view
     panel.orderFrontRegardless()
     return (panel, view, renderer)
+}
+
+if CommandLine.arguments.contains("--selftest") {
+    let failures = snowpack.selfTest()
+    print(failures.isEmpty ? "selftest: OK" : "selftest FAILED:\n" + failures.joined(separator: "\n"))
+    exit(failures.isEmpty ? 0 : 1)
 }
 
 let app = NSApplication.shared

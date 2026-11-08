@@ -21,7 +21,7 @@ final class WindowTracker: @unchecked Sendable {
     // Everything below is touched only on `queue`.
     private let queue = DispatchQueue(label: "snowdrift.windows", qos: .userInteractive)
     private let timer: DispatchSourceTimer
-    private var last: [CGWindowID: (origin: CGPoint, velocity: CGVector)] = [:]
+    private var last: [CGWindowID: (frame: CGRect, velocity: CGVector)] = [:]
     private var lastPoll: CFTimeInterval = 0
     private var lastMotion: CFTimeInterval = 0
     private var fast = false
@@ -29,8 +29,10 @@ final class WindowTracker: @unchecked Sendable {
     private let ownPID = Int(getpid())
     private var polls = 0
     private var pollTime: Double = 0
+    private let debug: Bool
 
-    init() {
+    init(debug: Bool = false) {
+        self.debug = debug
         timer = DispatchSource.makeTimerSource(queue: queue)
         timer.setEventHandler { [unowned self] in poll() }
         timer.schedule(deadline: .now(), repeating: 0.25, leeway: .milliseconds(20))
@@ -77,11 +79,13 @@ final class WindowTracker: @unchecked Sendable {
         else { return }
         var next: [TrackedWindow] = []
         next.reserveCapacity(last.count + 4)
-        var nextLast: [CGWindowID: (origin: CGPoint, velocity: CGVector)] = [:]
+        var nextLast: [CGWindowID: (frame: CGRect, velocity: CGVector)] = [:]
         nextLast.reserveCapacity(last.count + 4)
 
         // Stage Manager: its strip thumbnails are app windows reported at the (tilted) thumbnail's
-        // bounding box, each with a WindowManager overlay at exactly the same bounds. Skip both.
+        // bounding box, each with a WindowManager overlay at exactly the same bounds. But it also lays
+        // an overlay over a full-size window while you drag it (measured: Finder 920x464, Telegram
+        // 850x696). What tells them apart: a window going into the strip suddenly *shrinks*.
         var stageThumbs: [CGRect] = []
         for case let w as NSDictionary in list where (w[kCGWindowOwnerName] as? String) == "WindowManager" {
             if let b = w[kCGWindowBounds] as? NSDictionary, let r = CGRect(dictionaryRepresentation: b) { stageThumbs.append(r) }
@@ -95,19 +99,37 @@ final class WindowTracker: @unchecked Sendable {
                   let id = w[kCGWindowNumber] as? CGWindowID,
                   let b = w[kCGWindowBounds] as? NSDictionary,
                   let r = CGRect(dictionaryRepresentation: b),
-                  r.width >= 40, r.height >= 40,                              // skip tiny helper windows
-                  !stageThumbs.contains(where: { $0.equalTo(r) })
+                  r.width >= 40, r.height >= 40                               // skip tiny helper windows
             else { continue }
+            if stageThumbs.contains(where: { $0.equalTo(r) }) {
+                // Thumbnail if we've never seen it full size, or it just shrank to under half.
+                guard let prev = last[id]?.frame,
+                      r.width >= prev.width * 0.5 && r.height >= prev.height * 0.5 else { continue }
+            }
 
             var v = CGVector.zero
             if let prev = last[id], dt < 0.1 {
-                let raw = CGVector(dx: (r.minX - prev.origin.x) / dt, dy: (r.minY - prev.origin.y) / dt)
+                let raw = CGVector(dx: (r.minX - prev.frame.minX) / dt, dy: (r.minY - prev.frame.minY) / dt)
                 // Smooth: WindowServer doesn't update every poll, so raw speed flickers between 0 and 2x.
                 v = CGVector(dx: prev.velocity.dx * 0.5 + raw.dx * 0.5, dy: prev.velocity.dy * 0.5 + raw.dy * 0.5)
             }
             if abs(v.dx) + abs(v.dy) > 1 || (last[id] == nil && !last.isEmpty) { lastMotion = now }
-            nextLast[id] = (r.origin, v)
+            nextLast[id] = (r, v)
             next.append(TrackedWindow(id: id, frame: r, velocity: v))
+        }
+        if debug {
+            // Why did a tracked window stop being tracked? (Its snow falls when that happens.)
+            for id in last.keys where nextLast[id] == nil {
+                var why = "not in the window list (closed/minimized/other Space)"
+                for case let w as NSDictionary in list where (w[kCGWindowNumber] as? CGWindowID) == id {
+                    let r = (w[kCGWindowBounds] as? NSDictionary).flatMap { CGRect(dictionaryRepresentation: $0) } ?? .zero
+                    why = String(format: "still listed: layer=%d alpha=%.2f owner=%@ bounds=%@ stageOverlayMatch=%d",
+                                 w[kCGWindowLayer] as? Int ?? -1, w[kCGWindowAlpha] as? Double ?? -1,
+                                 (w[kCGWindowOwnerName] as? String) ?? "?", NSStringFromRect(r),
+                                 stageThumbs.contains { $0.equalTo(r) } ? 1 : 0)
+                }
+                print(String(format: "[%.2f] tracker: window %d dropped: %@", now, id, why))
+            }
         }
         last = nextLast
         let snap = Snapshot(windows: next, time: now)

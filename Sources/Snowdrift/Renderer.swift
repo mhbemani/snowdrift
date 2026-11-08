@@ -285,7 +285,7 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
             var start = 0
             while start < n - 1 || (n == 1 && start == 0) {
                 let end = min(start + 1024, n)
-                var params = PileParams(origin: [Float(s.x) - ox + Float(start) * Snowpack.colW, Float(s.y) - oy],
+                var params = PileParams(origin: [Float(s.x) - ox + Float(start) * Snowpack.colW, Float(s.y) - oy - p.lift],
                                         colW: Snowpack.colW, depth: s.depth - 0.001, radius: s.radius,
                                         startX: Float(start) * Snowpack.colW, width: Float(s.width), count: UInt32(end - start))
                 p.h.withUnsafeBytes { enc.setVertexBytes($0.baseAddress! + start * 4, length: (end - start) * 4, index: 0) }
@@ -307,7 +307,8 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
         // 4. Clumps.
         clumpData.removeAll(keepingCapacity: true)
         for c in snowpack.clumps where Float(screen.minX) <= c.x && c.x < Float(screen.maxX) {
-            clumpData.append([c.x - ox, c.y - oy, c.size, 0.95])
+            let fade = c.alpha
+            clumpData.append([c.x - ox, c.y - oy, c.size * (0.6 + 0.4 * fade), 0.95 * fade])   // thin out as they fall
         }
         if !clumpData.isEmpty {
             enc.setRenderPipelineState(clumpPipeline)
