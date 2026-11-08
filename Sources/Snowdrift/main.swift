@@ -1,48 +1,70 @@
 // Snowdrift: click-through overlay on every screen with Metal-drawn snow that piles up.
-// Run: swift run -c release Snowdrift [--seconds N] [--fps F] [--debug] [--lead L] [--snowrate R]
+// Run: swift run -c release Snowdrift [options]
 //   --seconds N   auto-quit after N seconds (safety net for test runs)
-//   --fps F       frame rate cap (default 60)
-//   --debug       outline tracked windows + Dock estimate, print stats on quit
-//   --lead L      predict window position L frames ahead to hide overlay lag (default 1)
-//   --snowrate R  pile growth speed multiplier (default 1; try 10 to see piles quickly)
-//   --selftest    check the plow's invariants (mass kept, ridge capped) and exit
-//   --log         print why snow leaves a window (no outlines; --debug includes this)
+//   --fps F       frame rate cap, 1–120 (default 60)
+//   --lead L      predict window positions L frames ahead to hide overlay lag, 0–5 (default 1)
+//   --snowrate R  pile growth speed multiplier, 0–100 (default 1; 20 to see piles quickly)
+//   --debug       outline tracked windows + Dock estimate, print stats on quit (includes --log)
+//   --log         print why snow leaves a window
+//   --selftest    check the physics invariants and exit
+//
+// Files: main (startup) · Controller (menu, settings, pause, displays) · Snowpack (snow on surfaces)
+// · Model (surfaces, piles, per-pile physics) · Physics (tunables) · WindowTracker · Dock
+// · Renderer + Shaders (Metal) · SelfTest.
 
 import AppKit
-import MetalKit
 
-func arg(_ name: String) -> Double? {
-    CommandLine.arguments.firstIndex(of: name).flatMap { $0 + 1 < CommandLine.arguments.count ? Double(CommandLine.arguments[$0 + 1]) : nil }
+/// Command-line options, clamped to safe ranges (a bad value can't divide by zero or overflow).
+struct Options {
+    var seconds: Double?
+    var fps = 60
+    var leadFrames = 1.0
+    var snowRate: Float = 1
+    var debug = false, log = false, selfTest = false
+
+    init(_ args: [String]) {
+        func value(_ name: String) -> Double? {
+            guard let i = args.firstIndex(of: name), i + 1 < args.count, let v = Double(args[i + 1]), v.isFinite else { return nil }
+            return v
+        }
+        seconds = value("--seconds").map { max(0, $0) }
+        fps = Int(min(120, max(1, value("--fps") ?? 60)))
+        leadFrames = min(5, max(0, value("--lead") ?? 1))
+        snowRate = Float(min(100, max(0, value("--snowrate") ?? 1)))
+        debug = args.contains("--debug")
+        log = debug || args.contains("--log")
+        selfTest = args.contains("--selftest")
+    }
 }
-let fps = Int(arg("--fps") ?? 60)
-let debug = CommandLine.arguments.contains("--debug")
-let eventLog = debug || CommandLine.arguments.contains("--log")
-let tracker = WindowTracker(debug: eventLog)
-let dock = DockInfo()
 
-// Screens in global top-left coordinates (what the window list uses); Cocoa is bottom-left.
+/// Screens in global top-left coordinates (what the window list uses); Cocoa is bottom-left with
+/// the primary screen at the origin. Empty while displays reconfigure.
 @MainActor func currentScreens() -> [ScreenInfo] {
-    let primaryHeight = NSScreen.screens[0].frame.height
+    guard let primary = NSScreen.screens.first else { return [] }
     return NSScreen.screens.map { s in
-        ScreenInfo(frame: CGRect(x: s.frame.minX, y: primaryHeight - s.frame.maxY, width: s.frame.width, height: s.frame.height),
+        ScreenInfo(frame: CGRect(x: s.frame.minX, y: primary.frame.height - s.frame.maxY, width: s.frame.width, height: s.frame.height),
                    menuBar: s.frame.maxY - s.visibleFrame.maxY,
                    dockThickness: s.visibleFrame.minY - s.frame.minY)
     }
 }
-let screenInfos = currentScreens()
-// Points per centimetre on the main display, from its physical size (EDID), for "6–7 cm" distances.
-let pointsPerCm: Float = {
-    let mm = CGDisplayScreenSize(CGMainDisplayID())
-    let pts = NSScreen.screens[0].frame.width
-    return mm.width > 0 ? Float(pts / (mm.width / 10)) : 49
-}()
-let snowpack = Snowpack(tracker: tracker, dock: dock, screens: screenInfos,
-                        lead: (arg("--lead") ?? 1) / Double(fps), rateScale: Float(arg("--snowrate") ?? 1),
-                        pointsPerCm: pointsPerCm)
-snowpack.debugLog = eventLog
 
-if CommandLine.arguments.contains("--selftest") {
-    let failures = snowpack.selfTest()
+/// Points per centimetre on the main display, from its physical size (EDID), for real-world distances.
+@MainActor func pointsPerCentimetre() -> Float {
+    let mm = CGDisplayScreenSize(CGMainDisplayID())
+    guard let width = NSScreen.screens.first?.frame.width, mm.width > 0 else { return 49 }   // ~13" laptop
+    return Float(width / (mm.width / 10))
+}
+
+let options = Options(CommandLine.arguments)
+let tracker = WindowTracker(debug: options.log)
+let dock = DockInfo()
+let snowpack = Snowpack(tracker: tracker, dock: dock, screens: currentScreens(),
+                        lead: options.leadFrames / Double(options.fps), rateScale: options.snowRate,
+                        pointsPerCm: pointsPerCentimetre())
+snowpack.debugLog = options.log
+
+if options.selfTest {
+    let failures = selfTest(snowpack)
     print(failures.isEmpty ? "selftest: OK" : "selftest FAILED:\n" + failures.joined(separator: "\n"))
     exit(failures.isEmpty ? 0 : 1)
 }
@@ -50,26 +72,20 @@ if CommandLine.arguments.contains("--selftest") {
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)             // no Dock icon, no app menu
 
-guard let device = MTLCreateSystemDefaultDevice() else { fatalError("No Metal device") }
-let controller = try Controller(device: device, snowpack: snowpack, tracker: tracker, fps: fps, debug: debug,
-                                screens: currentScreens)
+guard let device = MTLCreateSystemDefaultDevice() else { fatalError("Snowdrift needs a Metal GPU") }
+let controller: Controller
+do {
+    controller = try Controller(gpu: try GPU(device: device, debug: options.debug), dock: dock, snowpack: snowpack,
+                                tracker: tracker, fps: options.fps, screens: currentScreens)
+} catch {
+    fatalError("Snowdrift couldn't start the GPU: \(error)")
+}
 
-let ws = NSWorkspace.shared.notificationCenter
-// The Dock's width changes with its items: running apps get icons (launch/quit), and pinning or
-// unpinning only shows up in its preferences, so those are re-read every 10 s (one small file read).
-for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
-    ws.addObserver(forName: name, object: nil, queue: .main) { _ in
-        MainActor.assumeIsolated { if dock.refresh() { snowpack.dockChanged() } }
-    }
-}
-Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in
-    MainActor.assumeIsolated { if dock.refresh() { snowpack.dockChanged() } }
-}
-if debug {
+if options.debug {
     NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
         print(tracker.stats())
         MainActor.assumeIsolated {
-            let snow = snowpack.piles.values.reduce(0) { $0 + $1.h.reduce(0, +) } * Snowpack.colW
+            let snow = snowpack.piles.values.reduce(0) { $0 + $1.mass }
             print("dock platter:", snowpack.dockRect.map { NSStringFromRect($0) } ?? "none")
             print(String(format: "piles: %d, total snow %.0f pt², awake %d, clumps %d, landing rates %@",
                          snowpack.piles.count, snow, snowpack.piles.values.filter(\.awake).count, snowpack.clumps.count,
@@ -78,8 +94,8 @@ if debug {
     }
 }
 
-if let secs = arg("--seconds") {
-    DispatchQueue.main.asyncAfter(deadline: .now() + secs) { app.terminate(nil) }
+if let seconds = options.seconds {
+    DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { app.terminate(nil) }
 }
 
 app.run()

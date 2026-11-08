@@ -1,10 +1,11 @@
 import AppKit
 import MetalKit
 
-/// Menu bar, settings, pause rules and displays.
+/// Menu bar, settings, pause rules, displays and the Dock.
 ///
 /// Pausing: drawing *and* window polling stop entirely (0 CPU) while any reason holds: snow turned
-/// off, displays asleep, screen locked, screensaver running. Low Power Mode halves the frame rate.
+/// off, displays asleep, screen locked, screensaver running, no display. Low Power Mode halves the
+/// frame rate.
 @MainActor
 final class Controller: NSObject {
     enum Snowfall: Int, CaseIterable { case light, medium, heavy
@@ -16,14 +17,16 @@ final class Controller: NSObject {
         var speed: Float { [0, 6, 24][rawValue] }       // pt/s sideways
     }
 
-    private let device: MTLDevice
+    enum PauseReason: Hashable { case off, asleep, locked, screensaver, noDisplay }
+
+    private let gpu: GPU
+    private let dock: DockInfo
     private let snowpack: Snowpack
     private let tracker: WindowTracker
     private let baseFPS: Int
-    private let debug: Bool
     private let screens: () -> [ScreenInfo]
     private var overlays: [(panel: NSPanel, view: MTKView, renderer: SnowRenderer)] = []
-    private var pauseReasons: Set<String> = []
+    private var pauseReasons: Set<PauseReason> = []
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let defaults = UserDefaults.standard
 
@@ -41,10 +44,10 @@ final class Controller: NSObject {
         set { defaults.set(newValue, forKey: "hideFromSharing") }
     }
 
-    init(device: MTLDevice, snowpack: Snowpack, tracker: WindowTracker, fps: Int, debug: Bool,
+    init(gpu: GPU, dock: DockInfo, snowpack: Snowpack, tracker: WindowTracker, fps: Int,
          screens: @escaping () -> [ScreenInfo]) throws {
-        self.device = device; self.snowpack = snowpack; self.tracker = tracker
-        self.baseFPS = fps; self.debug = debug; self.screens = screens
+        self.gpu = gpu; self.dock = dock; self.snowpack = snowpack; self.tracker = tracker
+        self.baseFPS = fps; self.screens = screens
         super.init()
         statusItem.button?.image = NSImage(systemSymbolName: "snowflake", accessibilityDescription: "Snowdrift")
         try buildOverlays()
@@ -57,8 +60,11 @@ final class Controller: NSObject {
     private func buildOverlays() throws {
         for o in overlays { o.view.isPaused = true; o.view.delegate = nil; o.panel.orderOut(nil); o.panel.close() }
         overlays = []
-        snowpack.resetScreens(screens())
-        for (i, screen) in NSScreen.screens.enumerated() {
+        let infos = screens()
+        snowpack.resetScreens(infos)
+        // NSScreen.screens can be momentarily empty while displays reconfigure: wait for the next change.
+        if infos.isEmpty { pauseReasons.insert(.noDisplay) } else { pauseReasons.remove(.noDisplay) }
+        for (i, screen) in NSScreen.screens.enumerated() where i < infos.count {
             overlays.append(try makeOverlay(on: screen, index: i))
         }
         applyPause()
@@ -76,7 +82,7 @@ final class Controller: NSObject {
         panel.sharingType = hideFromSharing ? .none : .readOnly
         panel.isReleasedWhenClosed = false
 
-        let view = MTKView(frame: CGRect(origin: .zero, size: screen.frame.size), device: device)
+        let view = MTKView(frame: CGRect(origin: .zero, size: screen.frame.size), device: gpu.device)
         view.colorPixelFormat = .bgra8Unorm
         view.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
         view.layer?.isOpaque = false
@@ -87,14 +93,14 @@ final class Controller: NSObject {
         view.drawableSize = screen.frame.size
         (view.layer as? CAMetalLayer)?.maximumDrawableCount = 2     // one fewer full-screen buffer
         // Depth buffer for window occlusion: memoryless on Apple GPUs = lives in tile memory, no RAM.
-        view.depthStencilPixelFormat = SnowRenderer.depthFormat
-        view.depthStencilStorageMode = device.supportsFamily(.apple1) ? .memoryless : .private
+        view.depthStencilPixelFormat = GPU.depthFormat
+        view.depthStencilStorageMode = gpu.device.supportsFamily(.apple1) ? .memoryless : .private
         view.clearDepth = 1
 
-        let renderer = try SnowRenderer(device: device, size: screen.frame.size, screenIndex: index,
+        let renderer = try SnowRenderer(gpu: gpu, size: screen.frame.size, screenIndex: index,
                                         snowpack: snowpack, tracker: tracker,
-                                        density: snowfall.density, wind: wind.speed, debug: debug)
-        snowpack.screens[index].landingRate = renderer.landingRate
+                                        density: snowfall.density, wind: wind.speed)
+        snowpack.setLandingRate(renderer.landingRate, screen: index)
         view.delegate = renderer
         panel.contentView = view
         panel.orderFrontRegardless()
@@ -105,7 +111,7 @@ final class Controller: NSObject {
 
     private var currentFPS: Int { ProcessInfo.processInfo.isLowPowerModeEnabled ? min(baseFPS, 30) : baseFPS }
 
-    private func setPaused(_ reason: String, _ on: Bool) {
+    private func setPaused(_ reason: PauseReason, _ on: Bool) {
         if on { pauseReasons.insert(reason) } else { pauseReasons.remove(reason) }
         applyPause()
     }
@@ -115,7 +121,7 @@ final class Controller: NSObject {
         for o in overlays {
             o.view.isPaused = paused
             o.view.preferredFramesPerSecond = currentFPS
-            if pauseReasons.contains("off") { o.panel.orderOut(nil) } else { o.panel.orderFrontRegardless() }
+            if pauseReasons.contains(.off) { o.panel.orderOut(nil) } else { o.panel.orderFrontRegardless() }
         }
         tracker.setRunning(!paused)
     }
@@ -123,16 +129,18 @@ final class Controller: NSObject {
     private func observeSystem() {
         let ws = NSWorkspace.shared.notificationCenter
         ws.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.setPaused("asleep", true) }
+            MainActor.assumeIsolated { self?.setPaused(.asleep, true) }
         }
         ws.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.setPaused("asleep", false) }
+            MainActor.assumeIsolated { self?.setPaused(.asleep, false) }
         }
         // Lock screen and screensaver are only announced as distributed notifications.
         let dn = DistributedNotificationCenter.default()
-        for (name, reason, on) in [("com.apple.screenIsLocked", "locked", true), ("com.apple.screenIsUnlocked", "locked", false),
-                                   ("com.apple.screensaver.didstart", "screensaver", true),
-                                   ("com.apple.screensaver.didstop", "screensaver", false)] {
+        // Anyone can post these, but the worst a fake one can do is pause or resume the snow.
+        let events: [(String, PauseReason, Bool)] = [
+            ("com.apple.screenIsLocked", .locked, true), ("com.apple.screenIsUnlocked", .locked, false),
+            ("com.apple.screensaver.didstart", .screensaver, true), ("com.apple.screensaver.didstop", .screensaver, false)]
+        for (name, reason, on) in events {
             dn.addObserver(forName: .init(name), object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.setPaused(reason, on) }
             }
@@ -144,11 +152,27 @@ final class Controller: NSObject {
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.screensChanged() }
         }
+        // The Dock's width changes with its items: running apps get icons (launch/quit), and pinning or
+        // unpinning only shows up in its preferences, so those are re-read every 10 s (one small file read).
+        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
+            ws.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refreshDock() }
+            }
+        }
+        dockTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshDock() }
+        }
+    }
+
+    private var dockTimer: Timer?
+
+    private func refreshDock() {
+        if dock.refresh() { snowpack.dockChanged() }
     }
 
     private func screensChanged() {
         let new = screens()
-        if new.map(\.frame) == snowpack.screens.map(\.frame) {
+        if !new.isEmpty, new.map(\.frame) == snowpack.screens.map(\.frame) {
             snowpack.updateScreenMetrics(new)                  // same displays: just Dock / menu bar sizes
         } else {
             do { try buildOverlays() } catch { NSLog("Snowdrift: rebuilding overlays failed: \(error)") }
@@ -160,7 +184,7 @@ final class Controller: NSObject {
     private func buildMenu() {
         let menu = NSMenu()
         let snow = item("Snow", #selector(toggleSnow(_:)))
-        snow.state = pauseReasons.contains("off") ? .off : .on
+        snow.state = pauseReasons.contains(.off) ? .off : .on
         menu.addItem(snow)
         menu.addItem(.separator())
         menu.addItem(submenu("Snowfall", Snowfall.allCases.map { ($0.title, $0.rawValue, $0 == snowfall) }, #selector(pickSnowfall(_:))))
@@ -194,16 +218,14 @@ final class Controller: NSObject {
     }
 
     @objc private func toggleSnow(_ sender: NSMenuItem) {
-        setPaused("off", sender.state == .on)
-        sender.state = pauseReasons.contains("off") ? .off : .on
+        setPaused(.off, sender.state == .on)
+        sender.state = pauseReasons.contains(.off) ? .off : .on
     }
 
     @objc private func pickSnowfall(_ sender: NSMenuItem) {
         guard let choice = Snowfall(rawValue: sender.tag) else { return }
         snowfall = choice
-        for (i, o) in overlays.enumerated() where i < snowpack.screens.count {
-            snowpack.screens[i].landingRate = o.renderer.setDensity(choice.density)
-        }
+        for (i, o) in overlays.enumerated() { snowpack.setLandingRate(o.renderer.setDensity(choice.density), screen: i) }
         buildMenu()
     }
 

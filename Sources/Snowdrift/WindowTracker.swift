@@ -99,7 +99,8 @@ final class WindowTracker: @unchecked Sendable {
                   let id = w[kCGWindowNumber] as? CGWindowID,
                   let b = w[kCGWindowBounds] as? NSDictionary,
                   let r = CGRect(dictionaryRepresentation: b),
-                  r.width >= 40, r.height >= 40                               // skip tiny helper windows
+                  r.width >= 40, r.height >= 40,                              // skip tiny helper windows
+                  r.minX.isFinite, r.minY.isFinite, r.width.isFinite, r.height.isFinite
             else { continue }
             if stageThumbs.contains(where: { $0.equalTo(r) }) {
                 // Thumbnail if we've never seen it full size, or it just shrank to under half.
@@ -107,11 +108,15 @@ final class WindowTracker: @unchecked Sendable {
                       r.width >= prev.width * 0.5 && r.height >= prev.height * 0.5 else { continue }
             }
 
-            var v = CGVector.zero
-            if let prev = last[id], dt < 0.1 {
+            var v = last[id]?.velocity ?? .zero
+            // Two polls can land almost together (a mouse-down triggers an extra one): dividing by
+            // a near-zero dt would give a huge or NaN speed, so keep the last speed then.
+            if let prev = last[id], dt >= 0.005, dt < 0.1 {
                 let raw = CGVector(dx: (r.minX - prev.frame.minX) / dt, dy: (r.minY - prev.frame.minY) / dt)
                 // Smooth: WindowServer doesn't update every poll, so raw speed flickers between 0 and 2x.
                 v = CGVector(dx: prev.velocity.dx * 0.5 + raw.dx * 0.5, dy: prev.velocity.dy * 0.5 + raw.dy * 0.5)
+            } else if dt >= 0.1 {
+                v = .zero                                                   // long gap: it has stopped
             }
             if abs(v.dx) + abs(v.dy) > 1 || (last[id] == nil && !last.isEmpty) { lastMotion = now }
             nextLast[id] = (r, v)
