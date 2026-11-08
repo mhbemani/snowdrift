@@ -1,10 +1,10 @@
 # Snowdrift ❄️
 
-Snow that falls over your whole macOS desktop, piles up on your windows and the Dock, and reacts to your mouse and to windows you move, with physics close to real life.
+Snow that falls over your whole desktop (macOS and Windows), piles up on your windows and the Dock or taskbar, and reacts to your mouse and to windows you move, with physics close to real life.
 
 Built to run all day, so it is designed for the lowest possible CPU and memory use.
 
-> macOS 1.0 is out. Windows 11 is in progress (see [the plan](docs/windows-plan.md)).
+> macOS 1.0 is out. The Windows 11 version is built and being tested (see [the plan](docs/windows-plan.md)).
 
 ## Status
 
@@ -80,7 +80,7 @@ The snowflake in the menu bar has: Snow on/off, Snowfall (Light / Medium / Heavy
 
 ## Code
 
-The repo has one folder per platform: `macos/` (Swift, shipped), `windows/` (Rust, in progress), and `docs/`.
+The repo has one folder per platform: `macos/` (Swift, shipped), `windows/` (Rust, in testing), and `docs/`.
 
 macOS files, under `macos/Sources/Snowdrift/` unless noted:
 
@@ -98,6 +98,23 @@ macOS files, under `macos/Sources/Snowdrift/` unless noted:
 | `macos/scripts/build-app.sh` | universal `.app`, signing, release zip |
 | `macos/scripts/make-icon.swift` | draws `macos/Resources/AppIcon.icns` |
 
+Windows files, under `windows/src/` unless noted (same physics and self-check scenarios as macOS):
+
+| File | Role |
+|---|---|
+| `main.rs` | options, the live loop (pausing, rebuilds), the headless checks and `--bench` |
+| `desktop.rs` | monitors, windows (event hooks + DWM frames), taskbar, full screen, mouse |
+| `snowpack.rs`, `model.rs`, `physics.rs` | the snow, ported line for line from Swift |
+| `gpu.rs`, `shaders.rs`, `overlay.rs` | Direct3D 11 drawing, HLSL, one DirectComposition overlay per monitor |
+| `tray.rs`, `settings.rs` | tray menu, lock/display-off events, `snowdrift.ini`, Launch at Login |
+| `selftest.rs` | `--selftest` |
+| `windows/build.rs` | links the icon into the exe |
+| `windows/sync.sh`, `test.sh`, `package.sh` | build, check and zip on the Windows test machine over SSH |
+
+Windows: measured 0.9% of one CPU core and a 16.8 MB working set at 60 fps (`--bench`, RTX 3070 laptop, 1080p).
+
 ## Tech
 
-Swift 6 · AppKit · Metal (runtime-compiled MSL) · Core Graphics window list · Swift Package Manager
+macOS: Swift 6 · AppKit · Metal (runtime-compiled MSL) · Core Graphics window list · Swift Package Manager
+
+Windows: Rust · Direct3D 11 · DirectComposition · HLSL (runtime-compiled) · WinEvent hooks · DWM

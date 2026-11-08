@@ -1,5 +1,6 @@
 // Draws the app icon (Cozy Drift, blue cream) into Resources/AppIcon.iconset, then run
 //   iconutil -c icns Resources/AppIcon.iconset -o Resources/AppIcon.icns
+// It also writes ../windows/assets/snowdrift.ico (tray and exe icon: the tile filling the square).
 // Run from macos/: swift scripts/make-icon.swift
 //
 // Designed on the "Snowdrift App Icon" canvas (concept "Cozy Drift, blue cream"), then tuned for
@@ -40,13 +41,15 @@ func svgPath(_ d: String) -> CGPath {
 /// Contrast: the tile is a clear winter blue so the white snow and the cream window stand out
 /// (an all-pale version read as a white square). Small sizes (≤ 64 px: Finder, Spotlight) get a
 /// ~1 px outline; larger ones a soft outline that scales with the icon.
-func render(_ px: Int) -> Data {
+func render(_ px: Int, tight: Bool = false) -> Data {
     let s = CGFloat(px)
     let small = px <= 64
     let ctx = CGContext(data: nil, width: px, height: px, bitsPerComponent: 8, bytesPerRow: 0,
                         space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
     let k = s / 100
     ctx.translateBy(x: 0, y: s); ctx.scaleBy(x: k, y: -k)          // SVG units, y down
+    // Windows icons fill their square (macOS ones keep a margin): grow the tile to ~1 unit from the edge.
+    if tight { ctx.translateBy(x: 50, y: 50); ctx.scaleBy(x: 1.22, y: 1.22); ctx.translateBy(x: -50, y: -50) }
     // Shadow offsets/blur are in device pixels and ignore the transform; y up in device space.
     func shadow(_ dy: CGFloat, _ std: CGFloat, _ c: UInt32, _ a: CGFloat) {
         ctx.setShadow(offset: CGSize(width: 0, height: -dy * k), blur: 2 * std * k, color: color(c, a))
@@ -101,3 +104,22 @@ for size in [16, 32, 128, 256, 512] {
     try render(size * 2).write(to: out.appendingPathComponent("icon_\(size)x\(size)@2x.png"))
 }
 print("wrote \(out.path)")
+
+// .ico with PNG entries (Vista+): header, one 16-byte entry per size, then the PNGs.
+let icoSizes = [16, 20, 24, 32, 40, 48, 64, 256]
+let pngs = icoSizes.map { render($0, tight: true) }
+var ico = Data()
+func le16(_ v: Int) { ico.append(UInt8(v & 0xff)); ico.append(UInt8(v >> 8 & 0xff)) }
+func le32(_ v: Int) { le16(v & 0xffff); le16(v >> 16) }
+le16(0); le16(1); le16(icoSizes.count)
+var offset = 6 + 16 * icoSizes.count
+for (size, png) in zip(icoSizes, pngs) {
+    ico.append(UInt8(size % 256)); ico.append(UInt8(size % 256)); ico.append(0); ico.append(0)
+    le16(1); le16(32); le32(png.count); le32(offset)
+    offset += png.count
+}
+pngs.forEach { ico.append($0) }
+let icoURL = URL(fileURLWithPath: "../windows/assets/snowdrift.ico")
+try FileManager.default.createDirectory(at: icoURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+try ico.write(to: icoURL)
+print("wrote \(icoURL.path)")

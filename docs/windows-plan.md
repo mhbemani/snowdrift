@@ -17,10 +17,11 @@ Target: Windows 11 (Windows 10 should work), x64.
 | Full screen | window covering the Dock's area | `SHQueryUserNotificationState` (+ a window covering the monitor) |
 | Mouse | `NSEvent.mouseLocation` | `GetCursorPos` |
 | Menu | menu bar ❄ | system tray ❄ (`Shell_NotifyIcon`), same items |
-| Settings | `UserDefaults` | a small file in `%APPDATA%\Snowdrift` (a test flag points it elsewhere) |
+| Settings | `UserDefaults` | `snowdrift.ini` next to the exe (portable: nothing in AppData), written only when a setting changes |
 | Launch at login | `SMAppService` | `HKCU\…\Run` value, only when the user ticks it |
-| Pause | lock, screensaver, sleep, Low Power | `WTSRegisterSessionNotification` (lock), display power events, battery saver |
-| Display changes | `didChangeScreenParameters` | `WM_DISPLAYCHANGE` / `WM_DPICHANGED` |
+| Pause | lock, screensaver, sleep, Low Power | `WTSRegisterSessionNotification` (lock), `GUID_CONSOLE_DISPLAY_STATE` (display off), screensaver flag; energy saver caps it at 30 fps |
+| Display changes | `didChangeScreenParameters` | monitor list and scales compared once a second (catches resolution, scaling and plug/unplug alike); a lost graphics device rebuilds the same way |
+| App icon | `make-icon.swift` → `.icns` | the same script writes `windows/assets/snowdrift.ico`; `build.rs` links it in as a resource (no resource compiler needed) |
 
 Per-monitor DPI awareness v2 from the start (Windows mixes scales per monitor).
 
@@ -39,11 +40,16 @@ Later (not now): one shared Rust core for both platforms, called from Swift over
 | | What | Checked by |
 |---|---|---|
 | W0 ✅ | Workspace and toolchain in `D:\snowdrift`; hello-world builds over SSH | build log |
-| W1 | Overlay window per monitor, Direct3D 11 + DirectComposition, stateless falling flakes | offscreen render to PNG over SSH; then a person at the laptop |
-| W2 | Window tracking (event-driven, DWM frames, cloaked/minimized filter), taskbar surface | `--log` over SSH |
-| W3 | Port physics: piles, landing map, slab, friction, lumps, plow; self-check | `--selftest` over SSH |
-| W4 | Tray menu and settings, pause rules, display changes, full screen | person at the laptop |
-| W5 | Release: one zipped `Snowdrift.exe`, CPU/memory check, README, GitHub release next to the Mac zip | release page |
+| W1 ✅ | Overlay window per monitor, Direct3D 11 + DirectComposition, stateless falling flakes | `--render-test` (off-screen BMP) over SSH |
+| W2 ✅ | Window tracking (event-driven, DWM frames, cloaked/minimized filter), taskbar surface | `--track-test` over SSH |
+| W3 ✅ | Port physics: piles, landing map, slab, friction, lumps, plow; self-check | `--selftest` over SSH |
+| W4 ✅ | Tray menu and settings, pause rules, display changes, full screen | builds and starts over SSH; **live check at the laptop pending** |
+| W5 | Release: one zipped `Snowdrift.exe`, CPU/memory check, README, GitHub release next to the Mac zip | `--bench` ✅; release after the live check |
+
+Measured with `--bench 30` (RTX 3070 laptop, 1920×1080, a window sliding, the pointer plowing, 60 fps):
+**0.9% of one CPU core, 16.8 MB working set.** Most memory is the graphics driver; the app drops
+setup-only pages (driver init, shader compiler) after start, which took the steady working set from
+47 to 16 MB.
 
 ## Working on the test laptop (a friend's machine)
 
@@ -54,7 +60,10 @@ Later (not now): one shared Rust core for both platforms, called from Swift over
   `windows/build.ps1` sets PATH and `CARGO_HOME` for its own process only.
 - Only processes we start are stopped; every test run has an auto-quit (`--seconds N`).
 - Programs started over SSH can't show windows on the laptop's screen (no interactive desktop), so
-  over SSH we run the self-check and render test frames to PNG files. Seeing it live needs someone
+  over SSH we run the headless checks: `./sync.sh` (copy and build), `./test.sh` (self-check, window
+  tracking with test windows of its own, off-screen render), `--bench S`, `./package.sh` (zip).
+  Run them through PowerShell with piped output: `cmd` neither waits for a GUI-subsystem exe nor
+  shows what it prints. Seeing it live needs someone
   at the laptop to double-click the exe. (A scheduled task could get around this, but it's a system
   change, so we don't.)
 - Downloads happen only after the owner of this repo approves them (Rust 1.99.1: ~235 MB, approved).
