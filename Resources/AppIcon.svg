@@ -1,0 +1,36 @@
+<svg viewBox="0 0 100 100" width="1024" height="1024" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cozy Drift, blue cream: a cream window with a fluffy snow cap on pale blue">
+  <defs>
+    <linearGradient id="cozyBBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F5F9FE"></stop>
+      <stop offset="1" stop-color="#D6E4F4"></stop>
+    </linearGradient>
+    <linearGradient id="cozyBGlass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFAF2"></stop>
+      <stop offset="1" stop-color="#F5E8D6"></stop>
+    </linearGradient>
+    <clipPath id="cozyBClip"><rect x="9.8" y="9.8" width="80.4" height="80.4" rx="18"></rect></clipPath>
+    <filter id="cozyBShadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="1.2" stdDeviation="1.2" flood-color="#3F5A80" flood-opacity="0.22"></feDropShadow>
+    </filter>
+    <filter id="cozyBSoft" x="-10%" y="-20%" width="120%" height="150%">
+      <feDropShadow dx="0" dy="0.8" stdDeviation="0.8" flood-color="#5A7398" flood-opacity="0.25"></feDropShadow>
+    </filter>
+  </defs>
+  <rect x="9.8" y="9.8" width="80.4" height="80.4" rx="18" fill="url(#cozyBBg)" filter="url(#cozyBShadow)"></rect>
+  <g clip-path="url(#cozyBClip)">
+    <circle cx="28" cy="20" r="1.8" fill="#AFC7E4"></circle>
+    <circle cx="47" cy="16" r="1.4" fill="#AFC7E4"></circle>
+    <circle cx="70" cy="20" r="2" fill="#AFC7E4"></circle>
+    <circle cx="80" cy="30" r="1.3" fill="#AFC7E4"></circle>
+    <rect x="21" y="38" width="58" height="40" rx="7" fill="url(#cozyBGlass)" filter="url(#cozyBSoft)"></rect>
+    <circle cx="28.5" cy="46" r="2" fill="#F2A091"></circle>
+    <circle cx="34.5" cy="46" r="2" fill="#F3CC80"></circle>
+    <circle cx="40.5" cy="46" r="2" fill="#A6D8AC"></circle>
+    <rect x="27" y="54" width="30" height="3" rx="1.5" fill="#D3DFEE"></rect>
+    <rect x="27" y="61" width="44" height="3" rx="1.5" fill="#DCE6F2"></rect>
+    <rect x="27" y="68" width="22" height="3" rx="1.5" fill="#E3EBF5"></rect>
+    <path d="M17 39.5 C16 31 23 28 29 30.5 C32 24.5 41 24 45 29 C50 23.5 60 24 63 30 C69 27 81 29 83 37 C84.5 41.5 81 43 77 42.5 C76.5 46.5 72 47.5 70.5 43.5 L23 43 C19 43.5 17 42 17 39.5 Z" fill="#FFFFFF" filter="url(#cozyBSoft)"></path>
+    <ellipse cx="34" cy="31.5" rx="5" ry="1.6" fill="#FFFFFF" opacity="0.9"></ellipse>
+    <path d="M4 88 C20 80 36 85 50 83 C64 81 80 78 96 85 L96 100 L4 100 Z" fill="#FFFFFF" filter="url(#cozyBSoft)"></path>
+  </g>
+</svg>
