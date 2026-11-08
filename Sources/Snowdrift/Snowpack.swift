@@ -151,15 +151,39 @@ final class Snowpack {
 
     func dockChanged() { dockRect = dock.platter(on: screens); mapsDirty = true }
 
-    /// Menu bar / Dock sizes changed. Same screens only: a display added or removed needs a restart.
-    // ponytail: no hot-plugging of displays yet (M5).
+    /// Menu bar / Dock sizes changed on the same displays.
     func updateScreenMetrics(_ new: [ScreenInfo]) {
-        guard new.count == screens.count else { return }
+        guard new.count == screens.count else { return resetScreens(new) }
         for i in screens.indices {
             screens[i].menuBar = new[i].menuBar
             screens[i].dockThickness = new[i].dockThickness
         }
         dockChanged()
+    }
+
+    /// Displays were added, removed or rearranged. Window snow is kept (it's in global
+    /// coordinates); ground and Dock snow start over, since their screens changed.
+    func resetScreens(_ new: [ScreenInfo]) {
+        let rates = screens.map(\.landingRate)
+        screens = new
+        for i in screens.indices where i < rates.count { screens[i].landingRate = rates[i] }
+        maps = screens.map { _ in Array(repeating: 0, count: 2 * Self.mapSize) }
+        owner = screens.map { _ in Array(repeating: -1, count: Self.mapSize) }
+        for key in piles.keys { if case .window = key { continue }; piles[key] = nil; lastSurfaces[key] = nil }
+        surfaces = []; mapSurfaces = []
+        dockRect = dock.platter(on: screens)
+        mapsDirty = true
+    }
+
+    /// Menu: Clear All Snow.
+    func clearAll() {
+        for p in piles.values {
+            for i in p.h.indices { p.h[i] = 0 }
+            p.packed = []; p.edgeLoss = (0, 0); p.slideOffset = 0
+            p.contact = true; p.lift = 0; p.sliding = false; p.awake = true
+        }
+        clumps.removeAll()
+        mapsDirty = true
     }
 
     /// Advance to `now`. Every screen's renderer calls this; only the first call per frame works.
@@ -700,7 +724,22 @@ extension Snowpack {
         for _ in 0..<80 { slid += stepSideways(stop, vx: 0, dt: 1.0 / 60) }
         if slid < 20 || slid > 120 { fail.append("sideways: sudden stop at 500 pt/s slid \(slid) pt") }
 
-        // 7. Lumps fade: full at the start, gone at their reach.
+        // 7. Displays change: two screens, then back to the original one. Maps follow, window snow stays.
+        let original = screens
+        var two = original
+        var second = original[0]; second.frame = original[0].frame.offsetBy(dx: original[0].frame.width, dy: 0)
+        two.append(second)
+        resetScreens(two)
+        frame(now: CACurrentMediaTime() + 1)
+        if maps.count != 2 || owner.count != 2 { fail.append("displays: maps not resized for 2 screens") }
+        resetScreens(original)
+        frame(now: CACurrentMediaTime() + 2)
+        if maps.count != original.count { fail.append("displays: maps not restored") }
+        if piles.keys.contains(where: { if case .ground(let i) = $0 { return i >= original.count } else { return false } }) {
+            fail.append("displays: ground pile left for a removed screen")
+        }
+
+        // 8. Lumps fade: full at the start, gone at their reach.
         var lump = Clump(x: 0, y: 0, vx: 0, vy: 0, mass: 1, size: 3, gk: 1, reach: 300)
         if lump.alpha < 0.999 { fail.append("lump: not fully visible at start") }
         lump.fallen = 300

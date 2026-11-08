@@ -35,7 +35,10 @@ static float2 flakePos(Flake f, uint iid, float t, constant Uniforms &u, thread 
     float d    = f.y0 + f.fall * t;                    // total distance fallen
     float c    = floor(d / span);
     float y    = d - c * span - 10.0;
-    float x    = hash01(iid, uint(c)) * (u.viewSize.x + 40.0) - 20.0
+    // Start further left by however far the wind carries this flake during its trip, so a strong
+    // wind doesn't leave the left of the screen bare.
+    float windSpan = max(u.wind, 0.0) * span / f.fall;
+    float x    = hash01(iid, uint(c)) * (u.viewSize.x + 40.0 + windSpan) - 20.0 - windSpan
                + u.wind * (y + 10.0) / f.fall                         // drift during this trip
                + f.swayAmp * sin(t * f.swayFreq + f.phase);
     cycle = uint(c);
@@ -154,11 +157,12 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
     private let queue: MTLCommandQueue
     private let flakePipeline, clumpPipeline, occPipeline, pilePipeline: MTLRenderPipelineState
     private let rectPipeline: MTLRenderPipelineState?
-    private let landed: MTLBuffer               // 4 bytes per flake, written by the flake vertex shader
+    private var landed: MTLBuffer               // 4 bytes per flake, written by the flake vertex shader
     private var lastDraw = CACurrentMediaTime()
     private let depthWrite, depthTestOnly, depthOff: MTLDepthStencilState
-    private let flakes: MTLBuffer
-    private let count: Int
+    private var flakes: MTLBuffer
+    private var count: Int
+    private let device: MTLDevice
     private var uniforms: Uniforms
     private let start = CACurrentMediaTime()
     private let snowpack: Snowpack
@@ -166,7 +170,13 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
     private let tracker: WindowTracker
     private var mouseWasDown = false
     /// Landing flakes per second reaching the ground line on this screen (feeds pile growth).
-    let landingRate: Float
+    private(set) var landingRate: Float
+
+    /// Horizontal wind (pt/s). Changing it shifts flakes sideways once (positions are closed-form).
+    var wind: Float {
+        get { uniforms.wind }
+        set { uniforms.wind = newValue }
+    }
 
     // Scratch arrays reused every frame (no per-frame allocation).
     private var occ: [Occ] = []
@@ -175,7 +185,9 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
 
     static let depthFormat = MTLPixelFormat.depth32Float
 
-    init(device: MTLDevice, size: CGSize, screenIndex: Int, snowpack: Snowpack, tracker: WindowTracker, debug: Bool) throws {
+    init(device: MTLDevice, size: CGSize, screenIndex: Int, snowpack: Snowpack, tracker: WindowTracker,
+         density: Float, wind: Float, debug: Bool) throws {
+        self.device = device
         queue = device.makeCommandQueue()!
         let lib = try device.makeLibrary(source: shaderSource, options: nil)
         func pipeline(_ v: String, _ f: String, color: Bool = true) throws -> MTLRenderPipelineState {
@@ -206,8 +218,18 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
         depthTestOnly = depth(.less, write: false)
         depthOff = depth(.always, write: false)
 
-        // ponytail: flake count scales with screen area, density setting comes in M5
-        count = Int(size.width * size.height / 4500)
+        (flakes, landed, count, landingRate) = Self.makeFlakes(device: device, size: size, density: density)
+        uniforms = Uniforms(viewSize: [Float(size.width), Float(size.height)], time: 0, wind: wind, dt: 1.0 / 60)
+        self.snowpack = snowpack
+        self.screenIndex = screenIndex
+        self.tracker = tracker
+        super.init()
+    }
+
+    /// Flakes: one per 4500 pt² of screen at density 1. Written once to GPU memory, never touched again.
+    private static func makeFlakes(device: MTLDevice, size: CGSize, density: Float)
+        -> (MTLBuffer, MTLBuffer, Int, Float) {
+        let count = max(1, Int(Float(size.width * size.height) / 4500 * density))
         let h = Float(size.height)
         let data = (0..<count).map { _ -> Flake in
             let depth = pow(Float.random(in: 0...1), 3)                   // mostly small/far, few big/near
@@ -220,15 +242,18 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
                          // Near (big, blurry) flakes pass in front of everything; the rest land.
                          lands: depth < 0.6 && Float.random(in: 0..<1) < 0.7 ? 1 : 0)
         }
-        landingRate = data.reduce(0) { $0 + $1.lands * $1.fall / (h + 20) }
-        flakes = device.makeBuffer(bytes: data, length: MemoryLayout<Flake>.stride * count, options: .storageModeShared)!
-        landed = device.makeBuffer(length: 4 * count, options: .storageModeShared)!
+        let rate = data.reduce(0) { $0 + $1.lands * $1.fall / (h + 20) }
+        let flakes = device.makeBuffer(bytes: data, length: MemoryLayout<Flake>.stride * count, options: .storageModeShared)!
+        let landed = device.makeBuffer(length: 4 * count, options: .storageModeShared)!
         memset(landed.contents(), 0, 4 * count)
-        uniforms = Uniforms(viewSize: [Float(size.width), h], time: 0, wind: 6, dt: 1.0 / 60)
-        self.snowpack = snowpack
-        self.screenIndex = screenIndex
-        self.tracker = tracker
-        super.init()
+        return (flakes, landed, count, rate)
+    }
+
+    /// Change how much snow falls (rebuilds the flake buffer; returns the new landing rate).
+    func setDensity(_ density: Float) -> Float {
+        let size = CGSize(width: CGFloat(uniforms.viewSize.x), height: CGFloat(uniforms.viewSize.y))
+        (flakes, landed, count, landingRate) = Self.makeFlakes(device: device, size: size, density: density)
+        return landingRate
     }
 
     func mtkView(_ view: MTKView, drawableSizeWillChange newSize: CGSize) {
@@ -252,6 +277,7 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
 
         guard let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
 
+        guard screenIndex < snowpack.screens.count else { return }        // displays just changed
         let screen = snowpack.screens[screenIndex].frame
         let ox = Float(screen.minX), oy = Float(screen.minY)
         enc.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)

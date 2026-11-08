@@ -15,8 +15,8 @@ Built to run all day, so it is designed for the lowest possible CPU and memory u
 | M2 | Snow piles on window tops, the Dock and the screen bottom | ✅ |
 | M3 | Window motion physics: snow rides along, lifts off, is thrown up; rounded corners, Stage Manager, Dock shape, full screen | ✅ |
 | M4 | Mouse pushes and compacts snow; slab physics, sideways friction, fading lumps | ✅ |
-| M5 | Menu bar settings, multiple monitors, pause rules | ⏳ |
-| M6 | Signed release | |
+| M5 | Menu bar settings, multiple monitors, pause rules | ✅ |
+| M6 | Packaged .app, launch at login, signed release | ⏳ |
 
 The full plan is in [Snowdrift-Starter-Sheet.pdf](Snowdrift-Starter-Sheet.pdf).
 
@@ -33,6 +33,7 @@ The full plan is in [Snowdrift-Starter-Sheet.pdf](Snowdrift-Starter-Sheet.pdf).
 - **Lumps fade by real distance.** Falling lumps thin out and are gone within 6–7 cm, measured with the display's physical size.
 - **Dock without permissions.** The Dock's platter is computed from its live reserved height and its item count, using proportions measured once from a screenshot, so it follows the Dock as apps launch, quit, or get pinned.
 - **Prediction.** Window positions are extrapolated to the moment the frame reaches the screen, so snow doesn't trail a dragged window.
+- **Zero cost when nobody's looking.** Drawing and window polling stop entirely while snow is off, the screen is locked, the screensaver runs or the displays sleep; Low Power Mode halves the frame rate.
 - **No permissions, no network.** Only window rectangles are read (no titles, no pixels), so it never asks for Screen Recording or Accessibility.
 
 Measured on an Apple Silicon Mac with piles: about 2–5% of one CPU core (depends on system load) and 20–45 MB of memory at 60 fps.
@@ -55,7 +56,7 @@ swift run -c release Snowdrift
 | `--log` | print why snow leaves a window (tracking, slab breaking, sliding) |
 | `--selftest` | check the physics invariants (snow conserved, jitter ignored, hops land back) and exit |
 
-Quit from the snowflake in the menu bar. The overlay never catches clicks.
+The snowflake in the menu bar has: Snow on/off, Snowfall (Light / Medium / Heavy), Wind (Calm / Breeze / Windy), Clear All Snow, Hide from Screen Sharing (on by default), and Quit. Settings are remembered. Displays can be plugged in, removed or rearranged while it runs. The overlay never catches clicks.
 
 ## Tech
 
