@@ -37,8 +37,12 @@ func svgPath(_ d: String) -> CGPath {
     return p
 }
 
+/// Small sizes (≤ 64 px: Finder lists, Spotlight) get more contrast: a deeper blue tile, deeper
+/// flakes and lines, and a ~1 px outline around the window and the snow cap. Large sizes are the
+/// design exactly as approved.
 func render(_ px: Int) -> Data {
     let s = CGFloat(px)
+    let small = px <= 64
     let ctx = CGContext(data: nil, width: px, height: px, bitsPerComponent: 8, bytesPerRow: 0,
                         space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
     let k = s / 100
@@ -55,12 +59,15 @@ func render(_ px: Int) -> Data {
 
     // Background tile with its shadow.
     ctx.saveGState(); shadow(1.2, 1.2, 0x3F5A80, 0.22)
-    ctx.addPath(tile); ctx.setFillColor(color(0xD6E4F4)); ctx.fillPath(); ctx.restoreGState()
-    ctx.saveGState(); ctx.addPath(tile); ctx.clip(); vgradient(0xF5F9FE, 0xD6E4F4, 9.8, 90.2); ctx.restoreGState()
+    let (bgTop, bgBottom): (UInt32, UInt32) = small ? (0xE1ECF8, 0xB3CAE8) : (0xF5F9FE, 0xD6E4F4)
+    ctx.addPath(tile); ctx.setFillColor(color(bgBottom)); ctx.fillPath(); ctx.restoreGState()
+    ctx.saveGState(); ctx.addPath(tile); ctx.clip(); vgradient(bgTop, bgBottom, 9.8, 90.2); ctx.restoreGState()
+    let outline = color(0x7F9CC4)
+    let hairline = (px <= 32 ? 1.0 : 1.5) / k                     // ~1 px whatever the size
 
     ctx.saveGState(); ctx.addPath(tile); ctx.clip()
     // Falling flakes
-    ctx.setFillColor(color(0xAFC7E4))
+    ctx.setFillColor(color(small ? 0x8EADD6 : 0xAFC7E4))
     for (x, y, r) in [(28.0, 20.0, 1.8), (47, 16, 1.4), (70, 20, 2.0), (80, 30, 1.3)] {
         ctx.fillEllipse(in: CGRect(x: x - r, y: y - r, width: 2 * r, height: 2 * r))
     }
@@ -68,17 +75,21 @@ func render(_ px: Int) -> Data {
     let window = CGPath(roundedRect: CGRect(x: 21, y: 38, width: 58, height: 40), cornerWidth: 7, cornerHeight: 7, transform: nil)
     ctx.saveGState(); shadow(0.8, 0.8, 0x5A7398, 0.25); ctx.addPath(window); ctx.setFillColor(color(0xF5E8D6)); ctx.fillPath(); ctx.restoreGState()
     ctx.saveGState(); ctx.addPath(window); ctx.clip(); vgradient(0xFFFAF2, 0xF5E8D6, 38, 78); ctx.restoreGState()
+    if small { ctx.addPath(window); ctx.setStrokeColor(outline); ctx.setLineWidth(hairline); ctx.strokePath() }
     for (x, c) in [(28.5, 0xF2A091 as UInt32), (34.5, 0xF3CC80), (40.5, 0xA6D8AC)] {
         ctx.setFillColor(color(c)); ctx.fillEllipse(in: CGRect(x: x - 2, y: 44, width: 4, height: 4))
     }
-    for (y, w, c) in [(54.0, 30.0, 0xD3DFEE as UInt32), (61, 44, 0xDCE6F2), (68, 22, 0xE3EBF5)] {
+    let lines: [(CGFloat, CGFloat, UInt32)] = small ? [(54, 30, 0xB4C8E2), (61, 44, 0xBFD0E7), (68, 22, 0xC8D7EB)]
+                                                    : [(54, 30, 0xD3DFEE), (61, 44, 0xDCE6F2), (68, 22, 0xE3EBF5)]
+    for (y, w, c) in lines {
         ctx.addPath(CGPath(roundedRect: CGRect(x: 27, y: y, width: w, height: 3), cornerWidth: 1.5, cornerHeight: 1.5, transform: nil))
         ctx.setFillColor(color(c)); ctx.fillPath()
     }
     // Snow cap, highlight, drift
     ctx.saveGState(); shadow(0.8, 0.8, 0x5A7398, 0.25)
-    ctx.addPath(svgPath("M17 39.5 C16 31 23 28 29 30.5 C32 24.5 41 24 45 29 C50 23.5 60 24 63 30 C69 27 81 29 83 37 C84.5 41.5 81 43 77 42.5 C76.5 46.5 72 47.5 70.5 43.5 L23 43 C19 43.5 17 42 17 39.5 Z"))
-    ctx.setFillColor(color(0xFFFFFF)); ctx.fillPath(); ctx.restoreGState()
+    let cap = svgPath("M17 39.5 C16 31 23 28 29 30.5 C32 24.5 41 24 45 29 C50 23.5 60 24 63 30 C69 27 81 29 83 37 C84.5 41.5 81 43 77 42.5 C76.5 46.5 72 47.5 70.5 43.5 L23 43 C19 43.5 17 42 17 39.5 Z")
+    ctx.addPath(cap); ctx.setFillColor(color(0xFFFFFF)); ctx.fillPath(); ctx.restoreGState()
+    if small { ctx.addPath(cap); ctx.setStrokeColor(outline); ctx.setLineWidth(hairline); ctx.strokePath() }
     ctx.setFillColor(color(0xFFFFFF, 0.9)); ctx.fillEllipse(in: CGRect(x: 29, y: 29.9, width: 10, height: 3.2))
     ctx.saveGState(); shadow(0.8, 0.8, 0x5A7398, 0.25)
     ctx.addPath(svgPath("M4 88 C20 80 36 85 50 83 C64 81 80 78 96 85 L96 100 L4 100 Z"))
