@@ -1,6 +1,6 @@
 [package]
 name = "snowdrift"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 description = "Snow that falls over the Windows desktop and piles up on windows and the taskbar."
 

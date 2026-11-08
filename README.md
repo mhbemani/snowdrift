@@ -4,7 +4,7 @@ Snow that falls over your whole desktop (macOS and Windows), piles up on your wi
 
 Built to run all day, so it is designed for the lowest possible CPU and memory use.
 
-> macOS 1.0 is out. The Windows 11 version is built and being tested (see [the plan](docs/windows-plan.md)).
+> 1.0 is out for macOS and Windows 11: download from [Releases](../../releases).
 
 ## Status
 
@@ -42,6 +42,8 @@ Measured on an Apple Silicon Mac with piles: about 2–5% of one CPU core (depen
 
 ## Install
 
+### macOS
+
 1. Download `Snowdrift-1.0.0.zip` from [Releases](../../releases) and unzip it.
 2. Move **Snowdrift.app** to your Applications folder.
 3. Open it. The first time, macOS says it can't check the app (it's signed by me, not notarized by Apple):
@@ -49,6 +51,14 @@ Measured on an Apple Silicon Mac with piles: about 2–5% of one CPU core (depen
 4. A ❄ appears in the menu bar. Turn on **Launch at Login** there if you want it every day.
 
 Works on Apple Silicon and Intel Macs with macOS 14 or later. It asks for no permissions and uses no network.
+
+### Windows
+
+1. Download `Snowdrift-windows-1.0.0.zip` from [Releases](../../releases) and unzip it anywhere (it's portable: one exe, nothing to install).
+2. Double-click **Snowdrift.exe**. The first time, Windows SmartScreen may say it protected your PC (the exe isn't code-signed): click **More info → Run anyway**.
+3. A ❄ appears in the tray (bottom-right; under **^** if hidden): the same menu as on the Mac. Tick **Launch at Login** there if you want it every day.
+
+Windows 11 (Windows 10 should work), x64, any DirectX 11.1 graphics. Settings are kept in `snowdrift.ini` next to the exe. To remove it: untick Launch at Login, quit, delete the folder.
 
 ## Build
 
@@ -80,7 +90,7 @@ The snowflake in the menu bar has: Snow on/off, Snowfall (Light / Medium / Heavy
 
 ## Code
 
-The repo has one folder per platform: `macos/` (Swift, shipped), `windows/` (Rust, in testing), and `docs/`.
+The repo has one folder per platform: `macos/` (Swift), `windows/` (Rust), and `docs/`.
 
 macOS files, under `macos/Sources/Snowdrift/` unless noted:
 

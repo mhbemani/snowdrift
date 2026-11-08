@@ -1,4 +1,4 @@
-# Snowdrift for Windows: plan
+# Snowdrift for Windows: plan (done: 1.0.0)
 
 Same app as macOS 1.0: snow falls over the desktop, piles on window tops and the taskbar, reacts to
 windows you move and to the mouse, and costs as little as possible because it runs all day.
@@ -43,8 +43,8 @@ Later (not now): one shared Rust core for both platforms, called from Swift over
 | W1 ✅ | Overlay window per monitor, Direct3D 11 + DirectComposition, stateless falling flakes | `--render-test` (off-screen BMP) over SSH |
 | W2 ✅ | Window tracking (event-driven, DWM frames, cloaked/minimized filter), taskbar surface | `--track-test` over SSH |
 | W3 ✅ | Port physics: piles, landing map, slab, friction, lumps, plow; self-check | `--selftest` over SSH |
-| W4 ✅ | Tray menu and settings, pause rules, display changes, full screen | builds and starts over SSH; **live check at the laptop pending** |
-| W5 | Release: one zipped `Snowdrift.exe`, CPU/memory check, README, GitHub release next to the Mac zip | `--bench` ✅; release after the live check |
+| W4 ✅ | Tray menu and settings, pause rules, display changes, full screen | live check at the laptop ✅ |
+| W5 ✅ | Release: one zipped `Snowdrift.exe`, CPU/memory check, README, GitHub release | `--bench`, release `windows-v1.0.0` |
 
 Measured with `--bench 30` (RTX 3070 laptop, 1920×1080, a window sliding, the pointer plowing, 60 fps):
 **0.9% of one CPU core, 16.8 MB working set.** Most memory is the graphics driver; the app drops
