@@ -4,7 +4,7 @@ Snow that falls over your whole macOS desktop, piles up on your windows and the 
 
 Built to run all day, so it is designed for the lowest possible CPU and memory use.
 
-> Work in progress. macOS first; Windows 11 later.
+> macOS 1.0 is out. Windows 11 is in progress (see [the plan](docs/windows-plan.md)).
 
 ## Status
 
@@ -18,7 +18,7 @@ Built to run all day, so it is designed for the lowest possible CPU and memory u
 | M5 | Menu bar settings, multiple monitors, pause rules | ✅ |
 | M6 | Packaged .app, launch at login, signed release | ✅ |
 
-The full plan is in [Snowdrift-Starter-Sheet.pdf](Snowdrift-Starter-Sheet.pdf).
+The full plan is in [docs/Snowdrift-Starter-Sheet.pdf](docs/Snowdrift-Starter-Sheet.pdf). The Windows version's plan: [docs/windows-plan.md](docs/windows-plan.md).
 
 ## How it stays light
 
@@ -53,7 +53,7 @@ Works on Apple Silicon and Intel Macs with macOS 14 or later. It asks for no per
 ## Build
 
 ```bash
-scripts/build-app.sh 1.0.0      # → dist/Snowdrift.app and dist/Snowdrift-1.0.0.zip (universal, ad-hoc signed)
+macos/scripts/build-app.sh 1.0.0      # → macos/dist/Snowdrift.app and Snowdrift-1.0.0.zip (universal, ad-hoc signed)
 ```
 
 With a paid Apple developer account, set `SIGN_ID="Developer ID Application: …"` before running it (then notarize the zip with `notarytool`).
@@ -63,7 +63,7 @@ With a paid Apple developer account, set `SIGN_ID="Developer ID Application: …
 Requires macOS 14+ and the Xcode Command Line Tools (full Xcode isn't needed: shaders compile at runtime).
 
 ```bash
-swift run -c release Snowdrift
+cd macos && swift run -c release Snowdrift
 ```
 
 | Option | Meaning |
@@ -80,6 +80,10 @@ The snowflake in the menu bar has: Snow on/off, Snowfall (Light / Medium / Heavy
 
 ## Code
 
+The repo has one folder per platform: `macos/` (Swift, shipped), `windows/` (Rust, in progress), and `docs/`.
+
+macOS files, under `macos/Sources/Snowdrift/` unless noted:
+
 | File | Role |
 |---|---|
 | `main.swift` | startup, validated command-line options |
@@ -91,8 +95,8 @@ The snowflake in the menu bar has: Snow on/off, Snowfall (Light / Medium / Heavy
 | `Dock.swift` | the Dock's platter from its layout |
 | `Renderer.swift`, `Shaders.swift` | Metal: shared GPU setup, per-screen drawing, the shaders |
 | `SelfTest.swift` | `--selftest` |
-| `scripts/build-app.sh` | universal `.app`, signing, release zip |
-| `scripts/make-icon.swift` | draws `Resources/AppIcon.icns` |
+| `macos/scripts/build-app.sh` | universal `.app`, signing, release zip |
+| `macos/scripts/make-icon.swift` | draws `macos/Resources/AppIcon.icns` |
 
 ## Tech
 

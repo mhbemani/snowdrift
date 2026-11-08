@@ -1,6 +1,6 @@
 // Draws the app icon (Cozy Drift, blue cream) into Resources/AppIcon.iconset, then run
 //   iconutil -c icns Resources/AppIcon.iconset -o Resources/AppIcon.icns
-// Run from the repo root: swift scripts/make-icon.swift
+// Run from macos/: swift scripts/make-icon.swift
 //
 // Designed on the "Snowdrift App Icon" canvas (concept "Cozy Drift, blue cream"), then tuned for
 // contrast here. This script is the source of truth. It draws with Core Graphics in the design's
