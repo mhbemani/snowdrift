@@ -15,7 +15,7 @@ private let shaderSource = """
 using namespace metal;
 
 struct Flake { float y0, size, alpha, soft, fall, swayAmp, swayFreq, phase, lands; };  // static
-struct Uniforms { float2 viewSize; float time; float wind; };
+struct Uniforms { float2 viewSize; float time; float wind; float dt; };
 struct VOut { float4 pos [[position]]; float2 uv; float alpha; float soft; };
 
 static float4 toNDC(float2 p, float2 viewSize) {          // points, y down -> clip space
@@ -29,27 +29,46 @@ static float hash01(uint a, uint b) {
     return float(h & 0xffffu) / 65535.0;
 }
 
+// Closed-form flake position at time t. `cycle` = which trip down the screen this is.
+static float2 flakePos(Flake f, uint iid, float t, constant Uniforms &u, thread uint &cycle) {
+    float span = u.viewSize.y + 20.0;
+    float d    = f.y0 + f.fall * t;                    // total distance fallen
+    float c    = floor(d / span);
+    float y    = d - c * span - 10.0;
+    float x    = hash01(iid, uint(c)) * (u.viewSize.x + 40.0) - 20.0
+               + u.wind * (y + 10.0) / f.fall                         // drift during this trip
+               + f.swayAmp * sin(t * f.swayFreq + f.phase);
+    cycle = uint(c);
+    return float2(x, y);
+}
+
+static int mapIndex(float x, float width) { return clamp(int(x / width * 512.0), 0, 511); }
+
 // maps[0..511]: top of the first surface below (landing flakes stop there)
 // maps[512..1023]: ground top (every flake stops there)
 vertex VOut flakeVertex(uint vid [[vertex_id]], uint iid [[instance_id]],
                         const device Flake *flakes [[buffer(0)]],
                         constant Uniforms &u [[buffer(1)]],
-                        constant float *maps [[buffer(2)]]) {
+                        constant float *maps [[buffer(2)]],
+                        device uint *state [[buffer(3)]]) {
     Flake f = flakes[iid];
-    float span  = u.viewSize.y + 20.0;
-    float d     = f.y0 + f.fall * u.time;              // total distance fallen
-    float cycle = floor(d / span);                      // which trip down the screen
-    float y     = d - cycle * span - 10.0;
-    float x     = hash01(iid, uint(cycle)) * (u.viewSize.x + 40.0) - 20.0
-                + u.wind * (y + 10.0) / f.fall                        // drift during this trip
-                + f.swayAmp * sin(u.time * f.swayFreq + f.phase);
-    int ix = clamp(int(x / u.viewSize.x * 512.0), 0, 511);
-    float stopY = f.lands > 0.5 ? maps[ix] : maps[512 + ix];
-    // Fade over the last few points, so a flake melts into the pile instead of popping.
-    float fade = clamp((stopY + 1.0 - y) / 3.0, 0.0, 1.0);
+    uint cycle;
+    float2 p = flakePos(f, iid, u.time, u, cycle);
+    int ix = mapIndex(p.x, u.viewSize.x);
+    float land = maps[ix], ground = maps[512 + ix];
+    // The only per-flake state: state[i] = trip number + 1 if the flake landed on that trip.
+    // Set only when a flake *crosses* a surface line this frame, so a window that appears or
+    // rises over flakes doesn't swallow them: they were already past, in front of its face.
+    // Written here in the vertex shader (Apple GPUs allow it), so no extra compute pass.
+    if (vid == 0 && f.lands > 0.5 && p.y >= land && p.y - f.fall * u.dt < land) state[iid] = cycle + 1;
+    bool landed = f.lands > 0.5 && state[iid] == cycle + 1;
+    // Fade over the last few points above a line, so a flake melts into the pile instead of popping.
+    float fade = clamp((ground + 1.0 - p.y) / 3.0, 0.0, 1.0);
+    if (f.lands > 0.5 && p.y <= land) fade *= clamp((land + 1.0 - p.y) / 3.0, 0.0, 1.0);
+    if (landed) fade = 0.0;
     VOut o;
     float2 corner = float2(vid & 1, vid >> 1) * 2.0 - 1.0;            // triangle-strip quad
-    o.pos = fade > 0.0 ? toNDC(float2(x, y) + corner * f.size * 0.5, u.viewSize) : float4(2, 2, 2, 1);
+    o.pos = fade > 0.0 ? toNDC(p + corner * f.size * 0.5, u.viewSize) : float4(2, 2, 2, 1);
     o.uv = corner; o.alpha = f.alpha * fade; o.soft = f.soft;
     return o;
 }
@@ -83,14 +102,19 @@ vertex OOut occVertex(uint vid [[vertex_id]], uint iid [[instance_id]],
 fragment float4 occFragment() { return float4(0); }      // color writes are masked off
 
 // Piles: one quad per column, its top sloped to the next column's height (smooth surface).
-struct PileParams { float2 origin; float colW; float depth; uint count; };   // origin = left x, base y
+// origin = this chunk's left x and the surface's top y; startX = chunk start within the surface
+struct PileParams { float2 origin; float colW; float depth; float radius; float startX; float width; uint count; };
 struct POut { float4 pos [[position]]; float v; };
 vertex POut pileVertex(uint vid [[vertex_id]], uint iid [[instance_id]],
                        constant float *h [[buffer(0)]], constant Uniforms &u [[buffer(1)]],
                        constant PileParams &p [[buffer(2)]]) {
     uint right = vid & 1, top = vid >> 1;
     float hx = h[min(iid + right, p.count - 1)];
-    float2 pos = float2(p.origin.x + float(iid + right) * p.colW, p.origin.y - float(top) * hx);
+    // Rounded window corners: the base follows the curve (same formula as Surface.drop on the CPU).
+    float lx = p.startX + float(iid + right) * p.colW;
+    float d = min(lx, p.width - lx), base = 0.0;
+    if (d < p.radius) { float e = p.radius - max(d, 0.0); base = p.radius - sqrt(p.radius * p.radius - e * e); }
+    float2 pos = float2(p.origin.x + float(iid + right) * p.colW, p.origin.y + base - float(top) * hx);
     POut o;
     o.pos = toNDC(pos, u.viewSize);
     o.pos.z = p.depth;
@@ -121,15 +145,17 @@ fragment float4 rectFragment(ROut in [[stage_in]]) {
 """
 
 private struct Flake { var y0, size, alpha, soft, fall, swayAmp, swayFreq, phase, lands: Float }   // matches MSL
-private struct Uniforms { var viewSize: SIMD2<Float>; var time: Float; var wind: Float }
+private struct Uniforms { var viewSize: SIMD2<Float>; var time: Float; var wind: Float; var dt: Float }   // 24 B, matches MSL
 private struct Occ { var r: SIMD4<Float>; var depth: Float; var p0: Float = 0, p1: Float = 0, p2: Float = 0 }   // 32 B, matches MSL
-private struct PileParams { var origin: SIMD2<Float>; var colW: Float; var depth: Float; var count: UInt32 }
+private struct PileParams { var origin: SIMD2<Float>; var colW, depth, radius, startX, width: Float; var count: UInt32 }   // 32 B
 
 @MainActor
 final class SnowRenderer: NSObject, MTKViewDelegate {
     private let queue: MTLCommandQueue
     private let flakePipeline, clumpPipeline, occPipeline, pilePipeline: MTLRenderPipelineState
     private let rectPipeline: MTLRenderPipelineState?
+    private let landed: MTLBuffer               // 4 bytes per flake, written by the flake vertex shader
+    private var lastDraw = CACurrentMediaTime()
     private let depthWrite, depthTestOnly, depthOff: MTLDepthStencilState
     private let flakes: MTLBuffer
     private let count: Int
@@ -196,7 +222,9 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
         }
         landingRate = data.reduce(0) { $0 + $1.lands * $1.fall / (h + 20) }
         flakes = device.makeBuffer(bytes: data, length: MemoryLayout<Flake>.stride * count, options: .storageModeShared)!
-        uniforms = Uniforms(viewSize: [Float(size.width), h], time: 0, wind: 6)
+        landed = device.makeBuffer(length: 4 * count, options: .storageModeShared)!
+        memset(landed.contents(), 0, 4 * count)
+        uniforms = Uniforms(viewSize: [Float(size.width), h], time: 0, wind: 6, dt: 1.0 / 60)
         self.snowpack = snowpack
         self.screenIndex = screenIndex
         self.tracker = tracker
@@ -217,9 +245,12 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
         // ponytail: time wraps every hour so Float keeps sub-ms precision; all flakes jump once
         // per hour (invisible in falling snow). Pass a Double split if that ever shows.
         uniforms.time = Float((now - start).truncatingRemainder(dividingBy: 3600))
+        uniforms.dt = Float(min(now - lastDraw, 0.1))
+        lastDraw = now
         guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
-              let cmd = queue.makeCommandBuffer(), let enc = cmd.makeRenderCommandEncoder(descriptor: pass)
-        else { return }
+              let cmd = queue.makeCommandBuffer() else { return }
+
+        guard let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
 
         let screen = snowpack.screens[screenIndex].frame
         let ox = Float(screen.minX), oy = Float(screen.minY)
@@ -255,7 +286,8 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
             while start < n - 1 || (n == 1 && start == 0) {
                 let end = min(start + 1024, n)
                 var params = PileParams(origin: [Float(s.x) - ox + Float(start) * Snowpack.colW, Float(s.y) - oy],
-                                        colW: Snowpack.colW, depth: s.depth - 0.001, count: UInt32(end - start))
+                                        colW: Snowpack.colW, depth: s.depth - 0.001, radius: s.radius,
+                                        startX: Float(start) * Snowpack.colW, width: Float(s.width), count: UInt32(end - start))
                 p.h.withUnsafeBytes { enc.setVertexBytes($0.baseAddress! + start * 4, length: (end - start) * 4, index: 0) }
                 enc.setVertexBytes(&params, length: MemoryLayout<PileParams>.stride, index: 2)
                 enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: max(1, end - start - 1))
@@ -269,6 +301,7 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
         enc.setRenderPipelineState(flakePipeline)
         enc.setVertexBuffer(flakes, offset: 0, index: 0)
         snowpack.maps[screenIndex].withUnsafeBytes { enc.setVertexBytes($0.baseAddress!, length: $0.count, index: 2) }
+        enc.setVertexBuffer(landed, offset: 0, index: 3)
         enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: count)
 
         // 4. Clumps.
@@ -278,8 +311,11 @@ final class SnowRenderer: NSObject, MTKViewDelegate {
         }
         if !clumpData.isEmpty {
             enc.setRenderPipelineState(clumpPipeline)
-            clumpData.withUnsafeBytes { enc.setVertexBytes($0.baseAddress!, length: $0.count, index: 0) }   // ≤120 × 16 B
-            enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: clumpData.count)
+            for chunk in stride(from: 0, to: clumpData.count, by: 256) {                     // 4 KB = 256 × 16 B
+                let n = min(256, clumpData.count - chunk)
+                clumpData.withUnsafeBytes { enc.setVertexBytes($0.baseAddress! + chunk * 16, length: n * 16, index: 0) }
+                enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: n)
+            }
         }
 
         if let rectPipeline { drawOutlines(enc, rectPipeline, screen: screen) }

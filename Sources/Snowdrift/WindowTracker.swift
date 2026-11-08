@@ -80,14 +80,23 @@ final class WindowTracker: @unchecked Sendable {
         var nextLast: [CGWindowID: (origin: CGPoint, velocity: CGVector)] = [:]
         nextLast.reserveCapacity(last.count + 4)
 
+        // Stage Manager: its strip thumbnails are app windows reported at the (tilted) thumbnail's
+        // bounding box, each with a WindowManager overlay at exactly the same bounds. Skip both.
+        var stageThumbs: [CGRect] = []
+        for case let w as NSDictionary in list where (w[kCGWindowOwnerName] as? String) == "WindowManager" {
+            if let b = w[kCGWindowBounds] as? NSDictionary, let r = CGRect(dictionaryRepresentation: b) { stageThumbs.append(r) }
+        }
+
         for case let w as NSDictionary in list {
             guard (w[kCGWindowLayer] as? Int) == 0,                       // normal windows only
                   (w[kCGWindowOwnerPID] as? Int) != ownPID,
+                  (w[kCGWindowOwnerName] as? String) != "WindowManager",
                   (w[kCGWindowAlpha] as? Double ?? 1) > 0,
                   let id = w[kCGWindowNumber] as? CGWindowID,
                   let b = w[kCGWindowBounds] as? NSDictionary,
                   let r = CGRect(dictionaryRepresentation: b),
-                  r.width >= 40, r.height >= 40                               // skip tiny helper windows
+                  r.width >= 40, r.height >= 40,                              // skip tiny helper windows
+                  !stageThumbs.contains(where: { $0.equalTo(r) })
             else { continue }
 
             var v = CGVector.zero

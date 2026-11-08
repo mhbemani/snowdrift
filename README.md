@@ -13,8 +13,8 @@ Built to run all day, so it is designed for the lowest possible CPU and memory u
 | M0 | Click-through overlay on every screen, Metal-drawn falling snow | ✅ |
 | M1 | Window tracking (position, z-order, velocity) with lag prediction | ✅ |
 | M2 | Snow piles on window tops, the Dock and the screen bottom | ✅ |
-| M3 | Window motion physics: snow rides along, lifts off, is thrown up | ⏳ |
-| M4 | Mouse pushes and compacts snow | |
+| M3 | Window motion physics: snow rides along, lifts off, is thrown up; rounded corners, Stage Manager, Dock shape, full screen | ✅ |
+| M4 | Mouse pushes and compacts snow | ⏳ |
 | M5 | Menu bar settings, multiple monitors, pause rules | |
 | M6 | Signed release | |
 
@@ -28,6 +28,8 @@ The full plan is in [Snowdrift-Starter-Sheet.pdf](Snowdrift-Starter-Sheet.pdf).
 - **Adaptive window polling on its own thread.** Reading the window list costs ~1 ms and can wait ~10 ms, so it never runs on the render thread. It polls 4 times a second when idle and every frame only while the mouse is down or something just moved.
 - **Piles grow from a rate, not from flakes.** The GPU moves every flake; the CPU only knows how many land per second (~9) and adds snow as random bumps on whatever surface is exposed. Piles are height maps with a sand-pile slump rule at 20 Hz, run only on piles still changing; growth slows near the max height, so full piles cost nothing.
 - **Occlusion for free.** Windows are drawn into a depth buffer only, so snow on a window behind another is hidden by the GPU. On Apple GPUs that depth buffer is memoryless (tile memory, no RAM).
+- **Physics only while things move.** Window physics runs only when a window's velocity sample changes. One rule (snow stays unless the window accelerates down faster than gravity) covers dropping a window and stopping one that moves up. Flakes remember a landing with one number each, written by the flake vertex shader itself, so there's no extra GPU pass.
+- **Dock without permissions.** The Dock's platter is computed from its live reserved height and its item count, using proportions measured once from a screenshot, so it follows the Dock as apps launch, quit, or get pinned.
 - **Prediction.** Window positions are extrapolated to the moment the frame reaches the screen, so snow doesn't trail a dragged window.
 - **No permissions, no network.** Only window rectangles are read (no titles, no pixels), so it never asks for Screen Recording or Accessibility.
 

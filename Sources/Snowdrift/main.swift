@@ -18,12 +18,15 @@ let tracker = WindowTracker()
 let dock = DockInfo()
 
 // Screens in global top-left coordinates (what the window list uses); Cocoa is bottom-left.
-let primaryHeight = NSScreen.screens[0].frame.height
-let screenInfos = NSScreen.screens.map { s in
-    ScreenInfo(frame: CGRect(x: s.frame.minX, y: primaryHeight - s.frame.maxY, width: s.frame.width, height: s.frame.height),
-               menuBar: s.frame.maxY - s.visibleFrame.maxY,
-               dockThickness: s.visibleFrame.minY - s.frame.minY)
+@MainActor func currentScreens() -> [ScreenInfo] {
+    let primaryHeight = NSScreen.screens[0].frame.height
+    return NSScreen.screens.map { s in
+        ScreenInfo(frame: CGRect(x: s.frame.minX, y: primaryHeight - s.frame.maxY, width: s.frame.width, height: s.frame.height),
+                   menuBar: s.frame.maxY - s.visibleFrame.maxY,
+                   dockThickness: s.visibleFrame.minY - s.frame.minY)
+    }
 }
+let screenInfos = currentScreens()
 let snowpack = Snowpack(tracker: tracker, dock: dock, screens: screenInfos,
                         lead: (arg("--lead") ?? 1) / Double(fps), rateScale: Float(arg("--snowrate") ?? 1))
 
@@ -103,11 +106,19 @@ ws.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, que
         tracker.setRunning(on)
     }
 }
-// Running apps get Dock icons, so the Dock's width changes when apps launch or quit.
+// The Dock's width changes with its items: running apps get icons (launch/quit), and pinning or
+// unpinning only shows up in its preferences, so those are re-read every 10 s (one small file read).
 for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
     ws.addObserver(forName: name, object: nil, queue: .main) { _ in
-        MainActor.assumeIsolated { dock.refresh(); snowpack.dockChanged() }
+        MainActor.assumeIsolated { if dock.refresh() { snowpack.dockChanged() } }
     }
+}
+Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in
+    MainActor.assumeIsolated { if dock.refresh() { snowpack.dockChanged() } }
+}
+// Dock resized or shrunk to fit, menu bar or display changes: re-read the screen metrics.
+NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { _ in
+    MainActor.assumeIsolated { snowpack.updateScreenMetrics(currentScreens()) }
 }
 
 if debug {
@@ -115,6 +126,7 @@ if debug {
         print(tracker.stats())
         MainActor.assumeIsolated {
             let snow = snowpack.piles.values.reduce(0) { $0 + $1.h.reduce(0, +) } * Snowpack.colW
+            print("dock platter:", snowpack.dockRect.map { NSStringFromRect($0) } ?? "none")
             print(String(format: "piles: %d, total snow %.0f pt², awake %d, clumps %d, landing rates %@",
                          snowpack.piles.count, snow, snowpack.piles.values.filter(\.awake).count, snowpack.clumps.count,
                          snowpack.screens.map { String(format: "%.1f/s", $0.landingRate) }.joined(separator: " ")))
