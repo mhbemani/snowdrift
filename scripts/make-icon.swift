@@ -2,9 +2,9 @@
 //   iconutil -c icns Resources/AppIcon.iconset -o Resources/AppIcon.icns
 // Run from the repo root: swift scripts/make-icon.swift
 //
-// The design source is Resources/AppIcon.svg (made on the design canvas). macOS's SVG renderer
-// doesn't support its soft shadows (feDropShadow), so the same shapes are drawn here with Core
-// Graphics in the SVG's own 100×100, y-down coordinates.
+// Designed on the "Snowdrift App Icon" canvas (concept "Cozy Drift, blue cream"), then tuned for
+// contrast here. This script is the source of truth. It draws with Core Graphics in the design's
+// 100×100, y-down coordinates (macOS's SVG renderer can't do the soft shadows).
 import AppKit
 
 let out = URL(fileURLWithPath: "Resources/AppIcon.iconset")
@@ -37,9 +37,9 @@ func svgPath(_ d: String) -> CGPath {
     return p
 }
 
-/// Small sizes (≤ 64 px: Finder lists, Spotlight) get more contrast: a deeper blue tile, deeper
-/// flakes and lines, and a ~1 px outline around the window and the snow cap. Large sizes are the
-/// design exactly as approved.
+/// Contrast: the tile is a clear winter blue so the white snow and the cream window stand out
+/// (an all-pale version read as a white square). Small sizes (≤ 64 px: Finder, Spotlight) get a
+/// ~1 px outline; larger ones a soft outline that scales with the icon.
 func render(_ px: Int) -> Data {
     let s = CGFloat(px)
     let small = px <= 64
@@ -56,42 +56,38 @@ func render(_ px: Int) -> Data {
         ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: y0), end: CGPoint(x: 0, y: y1), options: [])
     }
     let tile = CGPath(roundedRect: CGRect(x: 9.8, y: 9.8, width: 80.4, height: 80.4), cornerWidth: 18, cornerHeight: 18, transform: nil)
+    let outline = color(0x5F82B4, small ? 1 : 0.55)
+    let lineWidth = small ? (px <= 32 ? 1.0 : 1.5) / k : 0.7        // ~1 px small; scales with the icon large
 
-    // Background tile with its shadow.
-    ctx.saveGState(); shadow(1.2, 1.2, 0x3F5A80, 0.22)
-    let (bgTop, bgBottom): (UInt32, UInt32) = small ? (0xE1ECF8, 0xB3CAE8) : (0xF5F9FE, 0xD6E4F4)
-    ctx.addPath(tile); ctx.setFillColor(color(bgBottom)); ctx.fillPath(); ctx.restoreGState()
-    ctx.saveGState(); ctx.addPath(tile); ctx.clip(); vgradient(bgTop, bgBottom, 9.8, 90.2); ctx.restoreGState()
-    let outline = color(0x7F9CC4)
-    let hairline = (px <= 32 ? 1.0 : 1.5) / k                     // ~1 px whatever the size
+    // Background tile: sky blue at the top to a deeper winter blue at the bottom.
+    ctx.saveGState(); shadow(1.4, 1.4, 0x22395C, 0.32)
+    ctx.addPath(tile); ctx.setFillColor(color(0x6F98D0)); ctx.fillPath(); ctx.restoreGState()
+    ctx.saveGState(); ctx.addPath(tile); ctx.clip(); vgradient(0xB6CFEE, 0x6F98D0, 9.8, 90.2); ctx.restoreGState()
 
     ctx.saveGState(); ctx.addPath(tile); ctx.clip()
-    // Falling flakes
-    ctx.setFillColor(color(small ? 0x8EADD6 : 0xAFC7E4))
-    for (x, y, r) in [(28.0, 20.0, 1.8), (47, 16, 1.4), (70, 20, 2.0), (80, 30, 1.3)] {
+    // Falling flakes: white, like snow against a blue sky
+    ctx.setFillColor(color(0xFFFFFF, 0.95))
+    for (x, y, r) in [(28.0, 20.0, 1.9), (47, 16, 1.5), (70, 20, 2.1), (80, 30, 1.4)] {
         ctx.fillEllipse(in: CGRect(x: x - r, y: y - r, width: 2 * r, height: 2 * r))
     }
-    // Window (cream), soft shadow
+    // Window: warm cream, soft shadow, outline
     let window = CGPath(roundedRect: CGRect(x: 21, y: 38, width: 58, height: 40), cornerWidth: 7, cornerHeight: 7, transform: nil)
-    ctx.saveGState(); shadow(0.8, 0.8, 0x5A7398, 0.25); ctx.addPath(window); ctx.setFillColor(color(0xF5E8D6)); ctx.fillPath(); ctx.restoreGState()
-    ctx.saveGState(); ctx.addPath(window); ctx.clip(); vgradient(0xFFFAF2, 0xF5E8D6, 38, 78); ctx.restoreGState()
-    if small { ctx.addPath(window); ctx.setStrokeColor(outline); ctx.setLineWidth(hairline); ctx.strokePath() }
-    for (x, c) in [(28.5, 0xF2A091 as UInt32), (34.5, 0xF3CC80), (40.5, 0xA6D8AC)] {
+    ctx.saveGState(); shadow(1.0, 1.0, 0x2E4A72, 0.35); ctx.addPath(window); ctx.setFillColor(color(0xF2DFC4)); ctx.fillPath(); ctx.restoreGState()
+    ctx.saveGState(); ctx.addPath(window); ctx.clip(); vgradient(0xFFF7EA, 0xF2DFC4, 38, 78); ctx.restoreGState()
+    ctx.addPath(window); ctx.setStrokeColor(outline); ctx.setLineWidth(lineWidth); ctx.strokePath()
+    for (x, c) in [(28.5, 0xEE8A78 as UInt32), (34.5, 0xF0BE5E), (40.5, 0x8CCB94)] {
         ctx.setFillColor(color(c)); ctx.fillEllipse(in: CGRect(x: x - 2, y: 44, width: 4, height: 4))
     }
-    let lines: [(CGFloat, CGFloat, UInt32)] = small ? [(54, 30, 0xB4C8E2), (61, 44, 0xBFD0E7), (68, 22, 0xC8D7EB)]
-                                                    : [(54, 30, 0xD3DFEE), (61, 44, 0xDCE6F2), (68, 22, 0xE3EBF5)]
-    for (y, w, c) in lines {
-        ctx.addPath(CGPath(roundedRect: CGRect(x: 27, y: y, width: w, height: 3), cornerWidth: 1.5, cornerHeight: 1.5, transform: nil))
+    for (y, w, c) in [(54.0, 30.0, 0xA9BFDD as UInt32), (61, 44, 0xB6CAE4), (68, 22, 0xC2D2E8)] {
+        ctx.addPath(CGPath(roundedRect: CGRect(x: 27, y: CGFloat(y), width: CGFloat(w), height: 3), cornerWidth: 1.5, cornerHeight: 1.5, transform: nil))
         ctx.setFillColor(color(c)); ctx.fillPath()
     }
-    // Snow cap, highlight, drift
-    ctx.saveGState(); shadow(0.8, 0.8, 0x5A7398, 0.25)
+    // Snow cap and drift: pure white with a cool shadow
+    ctx.saveGState(); shadow(1.0, 1.0, 0x2E4A72, 0.35)
     let cap = svgPath("M17 39.5 C16 31 23 28 29 30.5 C32 24.5 41 24 45 29 C50 23.5 60 24 63 30 C69 27 81 29 83 37 C84.5 41.5 81 43 77 42.5 C76.5 46.5 72 47.5 70.5 43.5 L23 43 C19 43.5 17 42 17 39.5 Z")
     ctx.addPath(cap); ctx.setFillColor(color(0xFFFFFF)); ctx.fillPath(); ctx.restoreGState()
-    if small { ctx.addPath(cap); ctx.setStrokeColor(outline); ctx.setLineWidth(hairline); ctx.strokePath() }
-    ctx.setFillColor(color(0xFFFFFF, 0.9)); ctx.fillEllipse(in: CGRect(x: 29, y: 29.9, width: 10, height: 3.2))
-    ctx.saveGState(); shadow(0.8, 0.8, 0x5A7398, 0.25)
+    ctx.addPath(cap); ctx.setStrokeColor(outline); ctx.setLineWidth(lineWidth); ctx.strokePath()
+    ctx.saveGState(); shadow(1.0, 1.0, 0x2E4A72, 0.3)
     ctx.addPath(svgPath("M4 88 C20 80 36 85 50 83 C64 81 80 78 96 85 L96 100 L4 100 Z"))
     ctx.setFillColor(color(0xFFFFFF)); ctx.fillPath(); ctx.restoreGState()
     ctx.restoreGState()
