@@ -12,8 +12,8 @@ Built to run all day, so it is designed for the lowest possible CPU and memory u
 |---|---|---|
 | M0 | Click-through overlay on every screen, Metal-drawn falling snow | ✅ |
 | M1 | Window tracking (position, z-order, velocity) with lag prediction | ✅ |
-| M2 | Snow piles on window tops, the Dock and the screen bottom | ⏳ |
-| M3 | Window motion physics: snow rides along, lifts off, is thrown up | |
+| M2 | Snow piles on window tops, the Dock and the screen bottom | ✅ |
+| M3 | Window motion physics: snow rides along, lifts off, is thrown up | ⏳ |
 | M4 | Mouse pushes and compacts snow | |
 | M5 | Menu bar settings, multiple monitors, pause rules | |
 | M6 | Signed release | |
@@ -26,10 +26,12 @@ The full plan is in [Snowdrift-Starter-Sheet.pdf](Snowdrift-Starter-Sheet.pdf).
 - **Static GPU data.** Flake data is uploaded once at startup and never touched again.
 - **1x drawables, 2 buffers.** Flakes are soft dots, so the overlay renders at 1x instead of Retina 2x with 2 drawables instead of 3: about 4x less GPU memory per screen.
 - **Adaptive window polling on its own thread.** Reading the window list costs ~1 ms and can wait ~10 ms, so it never runs on the render thread. It polls 4 times a second when idle and every frame only while the mouse is down or something just moved.
+- **Piles grow from a rate, not from flakes.** The GPU moves every flake; the CPU only knows how many land per second (~9) and adds snow as random bumps on whatever surface is exposed. Piles are height maps with a sand-pile slump rule at 20 Hz, run only on piles still changing; growth slows near the max height, so full piles cost nothing.
+- **Occlusion for free.** Windows are drawn into a depth buffer only, so snow on a window behind another is hidden by the GPU. On Apple GPUs that depth buffer is memoryless (tile memory, no RAM).
 - **Prediction.** Window positions are extrapolated to the moment the frame reaches the screen, so snow doesn't trail a dragged window.
 - **No permissions, no network.** Only window rectangles are read (no titles, no pixels), so it never asks for Screen Recording or Accessibility.
 
-Measured on an Apple Silicon Mac: about 5% of one CPU core and about 41 MB of memory at 60 fps.
+Measured on an Apple Silicon Mac with piles: about 2–5% of one CPU core (depends on system load) and 20–45 MB of memory at 60 fps.
 
 ## Run
 
@@ -43,8 +45,9 @@ swift run -c release Snowdrift
 |---|---|
 | `--seconds N` | quit automatically after N seconds |
 | `--fps F` | frame rate cap (default 60) |
-| `--debug` | outline tracked windows (cyan top edge = snow surface), print polling stats on quit |
+| `--debug` | outline tracked windows and the Dock estimate (cyan top edge = snow surface), print stats on quit |
 | `--lead L` | predict window positions L frames ahead (default 1) |
+| `--snowrate R` | pile growth speed multiplier (default 1; 10 to see piles fast) |
 
 Quit from the snowflake in the menu bar. The overlay never catches clicks.
 
