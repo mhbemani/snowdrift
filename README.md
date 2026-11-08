@@ -16,7 +16,7 @@ Built to run all day, so it is designed for the lowest possible CPU and memory u
 | M3 | Window motion physics: snow rides along, lifts off, is thrown up; rounded corners, Stage Manager, Dock shape, full screen | ✅ |
 | M4 | Mouse pushes and compacts snow; slab physics, sideways friction, fading lumps | ✅ |
 | M5 | Menu bar settings, multiple monitors, pause rules | ✅ |
-| M6 | Packaged .app, launch at login, signed release | ⏳ |
+| M6 | Packaged .app, launch at login, signed release | ✅ |
 
 The full plan is in [Snowdrift-Starter-Sheet.pdf](Snowdrift-Starter-Sheet.pdf).
 
@@ -40,7 +40,25 @@ The full plan is in [Snowdrift-Starter-Sheet.pdf](Snowdrift-Starter-Sheet.pdf).
 
 Measured on an Apple Silicon Mac with piles: about 2–5% of one CPU core (depends on system load) and 20–50 MB of memory at 60 fps.
 
-## Run
+## Install
+
+1. Download `Snowdrift-1.0.0.zip` from [Releases](../../releases) and unzip it.
+2. Move **Snowdrift.app** to your Applications folder.
+3. Open it. The first time, macOS says it can't check the app (it's signed by me, not notarized by Apple):
+   open **System Settings → Privacy & Security**, scroll down, click **Open Anyway**, and confirm. You only do this once.
+4. A ❄ appears in the menu bar. Turn on **Launch at Login** there if you want it every day.
+
+Works on Apple Silicon and Intel Macs with macOS 14 or later. It asks for no permissions and uses no network.
+
+## Build
+
+```bash
+scripts/build-app.sh 1.0.0      # → dist/Snowdrift.app and dist/Snowdrift-1.0.0.zip (universal, ad-hoc signed)
+```
+
+With a paid Apple developer account, set `SIGN_ID="Developer ID Application: …"` before running it (then notarize the zip with `notarytool`).
+
+## Run from source
 
 Requires macOS 14+ and the Xcode Command Line Tools (full Xcode isn't needed: shaders compile at runtime).
 
@@ -58,7 +76,7 @@ swift run -c release Snowdrift
 | `--log` | print why snow leaves a window (tracking, slab breaking, sliding) |
 | `--selftest` | check the physics invariants (snow conserved, jitter ignored, hops land back, plow stays local, slumping stops) and exit |
 
-The snowflake in the menu bar has: Snow on/off, Snowfall (Light / Medium / Heavy), Wind (Calm / Breeze / Windy), Clear All Snow, Hide from Screen Sharing (on by default), and Quit. Settings are remembered. Displays can be plugged in, removed or rearranged while it runs. The overlay never catches clicks.
+The snowflake in the menu bar has: Snow on/off, Snowfall (Light / Medium / Heavy), Wind (Calm / Breeze / Windy), Clear All Snow, Hide from Screen Sharing (on by default), Launch at Login (in the app), and Quit. Settings are remembered. Displays can be plugged in, removed or rearranged while it runs. The overlay never catches clicks.
 
 ## Code
 
@@ -73,6 +91,8 @@ The snowflake in the menu bar has: Snow on/off, Snowfall (Light / Medium / Heavy
 | `Dock.swift` | the Dock's platter from its layout |
 | `Renderer.swift`, `Shaders.swift` | Metal: shared GPU setup, per-screen drawing, the shaders |
 | `SelfTest.swift` | `--selftest` |
+| `scripts/build-app.sh` | universal `.app`, signing, release zip |
+| `scripts/make-icon.swift` | draws `Resources/AppIcon.icns` |
 
 ## Tech
 

@@ -1,5 +1,6 @@
 import AppKit
 import MetalKit
+import ServiceManagement
 
 /// Menu bar, settings, pause rules, displays and the Dock.
 ///
@@ -193,6 +194,12 @@ final class Controller: NSObject {
         let hide = item("Hide from Screen Sharing", #selector(toggleHide(_:)))
         hide.state = hideFromSharing ? .on : .off
         menu.addItem(hide)
+        // Login items are only allowed for a real app bundle (not `swift run`).
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            let login = item("Launch at Login", #selector(toggleLogin(_:)))
+            login.state = SMAppService.mainApp.status == .enabled ? .on : .off
+            menu.addItem(login)
+        }
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Snowdrift", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
@@ -237,6 +244,19 @@ final class Controller: NSObject {
     }
 
     @objc private func clearSnow() { snowpack.clearAll() }
+
+    /// Registers / removes Snowdrift as a login item (macOS shows it in System Settings → General →
+    /// Login Items, where it can also be turned off).
+    @objc private func toggleLogin(_ sender: NSMenuItem) {
+        let service = SMAppService.mainApp
+        do {
+            if service.status == .enabled { try service.unregister() } else { try service.register() }
+        } catch {
+            NSLog("Snowdrift: launch at login failed: \(error)")
+        }
+        if service.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
+        buildMenu()
+    }
 
     @objc private func toggleHide(_ sender: NSMenuItem) {
         hideFromSharing.toggle()
