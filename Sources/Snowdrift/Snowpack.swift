@@ -102,6 +102,7 @@ final class Snowpack {
     private let slabGravity: Float = 3000     // pt/s², snow resting on a window: hop = speed²/(2·this),
                                               // so stopping at 400 pt/s throws it ~27 pt
     private let breakLift: Float = 40         // a slab lifted higher than this breaks into lumps
+    private let maxThrowCm: Float = 10        // snow thrown up by a stopping window rises at most this high
     private let staticFriction: Float = 0.7   // sideways: snow sticks while the window accelerates ≤ this·g
     private let kineticFriction: Float = 0.5  // once slipping, the slide slows at this·g
     private let sideSmoothing: Float = 0.08   // s; window speed is smoothed this much first (sample jitter)
@@ -276,7 +277,9 @@ final class Snowpack {
                 p.ghostY = yw; p.ghostV = vw
             } else if yw - p.ghostY > 3 + 1.2 * abs(vw) / 60 {      // more than one sample of jitter
                 p.contact = false
-                p.slabY = yw; p.slabV = p.ghostV                    // leaves the window with the snow's speed
+                p.slabY = yw
+                // Leaves with the snow's speed, but never fast enough to rise more than maxThrowCm.
+                p.slabV = max(p.ghostV, -(2 * slabGravity * maxThrowCm * pointsPerCm).squareRoot())
             }
             p.lift = 0
             return 0
@@ -332,6 +335,10 @@ final class Snowpack {
     /// The slab breaks into lumps (one per few columns), each a little different so they spread apart.
     private func breakApart(_ p: Pile, _ s: Surface, velocity: SIMD2<Float>) {
         let n = p.h.count
+        // Lumps fall under lighter gravity than the slab, so cap their upward speed to what's left
+        // of the maxThrowCm height (measured from the window top).
+        let room = max(0, maxThrowCm * pointsPerCm - p.lift)
+        let minVy = -(2 * gravity * room).squareRoot()
         let budget = max(1, Self.maxClumps - clumps.count)
         let group = max(3, Int((Float(n) / Float(budget)).rounded(.up)))
         var i = 0
@@ -342,7 +349,7 @@ final class Snowpack {
                 let avg = sum / Float(end - i)
                 addClump(x: Float(s.x) + (Float(i + end) / 2) * Self.colW,
                          y: Float(s.y) + s.drop(column: (i + end) / 2) - p.lift - avg * 0.5,
-                         vx: velocity.x + Float.random(in: -30...30), vy: velocity.y + Float.random(in: -25...5),
+                         vx: velocity.x + Float.random(in: -30...30), vy: max(minVy, velocity.y + Float.random(in: -25...5)),
                          mass: sum * Self.colW, gk: Float.random(in: 0.75...1.25))
             }
             i = end
