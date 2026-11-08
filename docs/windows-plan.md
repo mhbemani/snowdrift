@@ -38,7 +38,7 @@ Later (not now): one shared Rust core for both platforms, called from Swift over
 
 | | What | Checked by |
 |---|---|---|
-| W0 | Workspace and toolchain inside `D:\voicelab\snowdrift`; hello-world builds over SSH | build log |
+| W0 ✅ | Workspace and toolchain in `D:\snowdrift`; hello-world builds over SSH | build log |
 | W1 | Overlay window per monitor, Direct3D 11 + DirectComposition, stateless falling flakes | offscreen render to PNG over SSH; then a person at the laptop |
 | W2 | Window tracking (event-driven, DWM frames, cloaked/minimized filter), taskbar surface | `--log` over SSH |
 | W3 | Port physics: piles, landing map, slab, friction, lumps, plow; self-check | `--selftest` over SSH |
@@ -47,12 +47,14 @@ Later (not now): one shared Rust core for both platforms, called from Swift over
 
 ## Working on the test laptop (a friend's machine)
 
-- Everything stays inside `D:\voicelab\snowdrift\`: source, toolchain (`RUSTUP_HOME`, `CARGO_HOME`),
-  build output, test settings, logs. No installer, admin rights, PATH/registry changes or Visual
-  Studio (the Rust GNU toolchain brings its own linker).
+- Everything stays inside `D:\snowdrift\` (outside the owner's `D:\voicelab` data): source, the Rust
+  toolchain (official component archives, SHA-256 checked, just unpacked: no rustup installer, which
+  could write to the registry), `CARGO_HOME`, build output, test settings, logs. No admin rights,
+  PATH/registry changes or Visual Studio (the GNU toolchain brings its own linker).
+  `windows/build.ps1` sets PATH and `CARGO_HOME` for its own process only.
 - Only processes we start are stopped; every test run has an auto-quit (`--seconds N`).
 - Programs started over SSH can't show windows on the laptop's screen (no interactive desktop), so
   over SSH we run the self-check and render test frames to PNG files. Seeing it live needs someone
   at the laptop to double-click the exe. (A scheduled task could get around this, but it's a system
   change, so we don't.)
-- Downloads (the Rust installer and toolchain) happen only after the owner of this repo approves them.
+- Downloads happen only after the owner of this repo approves them (Rust 1.99.1: ~235 MB, approved).
